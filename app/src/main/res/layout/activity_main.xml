@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?> 
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_base">
+
+    <ImageView
+        android:id="@+id/ivGradientBg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/bg_root_gradient"
+        android:scaleType="centerCrop"
+        android:alpha="0"
+        android:contentDescription="@null" />
+
+    <ImageView
+        android:id="@+id/ivHeroBg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/bg_dna_helix"
+        android:scaleType="centerCrop"
+        android:alpha="0"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:id="@+id/contentContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:alpha="0">
+
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/tabLayout"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginStart="14dp"
+            android:layout_marginTop="14dp"
+            android:layout_marginEnd="14dp"
+            android:padding="5dp"
+            android:background="@drawable/bg_card"
+            android:elevation="0dp"
+            app:tabIndicator="@drawable/bg_tab_indicator"
+            app:tabIndicatorAnimationMode="elastic"
+            app:tabIndicatorFullWidth="true"
+            app:tabIndicatorGravity="stretch"
+            app:tabRippleColor="@null"
+            app:tabSelectedTextColor="@color/text_primary"
+            app:tabTextColor="@color/text_secondary"
+            app:tabTextAppearance="@android:style/TextAppearance.Small"
+            app:tabMode="fixed"
+            app:tabGravity="fill">
+
+            <com.google.android.material.tabs.TabItem
+                android:id="@+id/tabConsole"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Console" />
+
+            <com.google.android.material.tabs.TabItem
+                android:id="@+id/tabPresets"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Presets" />
+
+        </com.google.android.material.tabs.TabLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <include layout="@layout/tab_console" />
+
+            <include layout="@layout/tab_presets" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+</FrameLayout>
