@@ -2,8 +2,6 @@
 
 **Helix** is an Android app for Meta Quest headsets that combines a wireless ADB console, movement / camera mods, hardware tweaks, and root tooling in one place.
 
-Contact: **blaku64th** on Discord if you run into issues.
-
 ---
 
 ## Features
@@ -260,8 +258,7 @@ Rotation mods additionally require **right trigger held** while active (`Rotatio
 
 ## Credits
 
-- Inspired by patterns from community Quest tooling (including EventHorizon-style root terminal & utils).
-- Maintainer contact: **blaku64th** on Discord.
+- Inspired by patterns from community Quest tooling (including EventHorizon root terminal & utils).
 
 ---
 
