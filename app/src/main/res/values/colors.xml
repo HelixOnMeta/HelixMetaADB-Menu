@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources> 
+    <color name="bg_base">#0D0716</color>
+    <color name="bg_wash">#2A1642</color>
+    <color name="surface">#1A1225</color>
+    <color name="surface_raised">#221A30</color>
+ 
+    <color name="glow_violet_core">#CCB24FE8</color>
+    <color name="glow_violet_mid">#66B24FE8</color>
+    <color name="glow_violet_edge">#00B24FE8</color>
+ 
+    <color name="glass_fill">#1FFFFFFF</color>
+    <color name="glass_fill_raised">#2EFFFFFF</color>
+    <color name="glass_border">#40FFFFFF</color>
+    <color name="glass_border_soft">#26FFFFFF</color>
+    <color name="glass_highlight">#59FFFFFF</color>
+
+    <color name="console_bg">#B3050308</color>
+    <color name="border">#33FFFFFF</color>
+    <color name="border_soft">#1FFFFFFF</color>
+ 
+    <color name="accent">#8B5CF6</color>
+    <color name="accent_secondary">#D946EF</color>
+    <color name="accent_dim">#332560</color>
+    <color name="accent_press">#7C3AED</color>
+ 
+    <color name="text_primary">#F5F3FF</color>
+    <color name="text_secondary">#B3ABC4</color>
+    <color name="text_muted">#7A7290</color>
+    <color name="on_accent">#FFFFFF</color>
+ 
+    <color name="status_ok">#34D399</color>
+    <color name="status_warn">#FBBF24</color>
+    <color name="status_error">#F87171</color>
+ 
+    <color name="terminal_text">#4ADE80</color>
+ 
+    <color name="blob_violet">#8B5CF6</color>
+    <color name="blob_fuchsia">#D946EF</color>
+    <color name="blob_cyan">#22D3EE</color>
+</resources>
