@@ -1,6 +1,4 @@
-**# HelixMetaADB-Menu
-Root, Boot Unlocker, Cheats, Hardware, Software, And so much more! Open source so feel free to add things yourself and make forks :)
-**# Helix
+# Helix
 
 **Helix** is an Android app for Meta Quest headsets that combines a wireless ADB console, movement / camera mods, hardware tweaks, and root tooling in one place.
 
