@@ -12,7 +12,6 @@ class Customization {
 
     companion object { 
         private const val pref = "payload_pref"
-
         const val bootmodel = "payload_boot_model"
         const val defaultmodel = "meta-horizonos.glb"
 
@@ -124,7 +123,7 @@ class Customization {
         val manager = AppAdbConnectionManager.getInstance(context)
         val pref = context.getSharedPreferences(pref, 0)
 
-        val enableMagisk = pref.getBoolean("payload_singularity_magisk", true)
+        val enableMagisk = pref.getBoolean("payload_magisk", true)
         val enablePersistentPort = pref.getBoolean("payload_persistent_port", true)
         val enableServicesPatch = pref.getBoolean("payload_services_patched", true)
         val enableSoftReboot = pref.getBoolean("payload_soft_reboot", true)
@@ -149,8 +148,8 @@ class Customization {
 
         val magiskScript = track(
             copyAssetOrNull(
-                assetManager, "$payload/singularity_magisk.sh",
-                File(cacheDir, "singularity_magisk.sh"), ctx
+                assetManager, "$payload/magisk.sh",
+                File(cacheDir, "magisk.sh"), ctx
             )
         )
         val persistentPort = track(
@@ -185,7 +184,7 @@ class Customization {
         val magiskApk = track(
             copyAssetOrNull(
                 assetManager, magiskpath,
-                File(cacheDir, "singularity-Magisk.apk"), ctx
+                File(cacheDir, "Magisk.apk"), ctx
             )
         )
 
@@ -194,7 +193,7 @@ class Customization {
             appendLine("#!/system/bin/sh")
             appendLine("if [ -f /persist/srt_push/token ]; then rm -f /persist/srt_push/token; echo 'Killswitch token removed successfully.'; fi")
             if (enableMagisk && magiskScript != null) {
-                appendLine("/data/local/tmp/singularity_magisk.sh")
+                appendLine("/data/local/tmp/magisk.sh")
             }
             if (enablePersistentPort && persistentPort != null) {
                 appendLine("/data/local/tmp/persistent_port.sh")
@@ -212,7 +211,7 @@ class Customization {
         payloadChain.writeText(chain.toString())
         staged += payloadChain
 
-        magiskScript?.let { pushToDevice(manager, ctx, it, "singularity_magisk.sh", true) }
+        magiskScript?.let { pushToDevice(manager, ctx, it, "magisk.sh", true) }
         persistentPort?.let { pushToDevice(manager, ctx, it, "persistent_port.sh", true) }
         softReboot?.let { pushToDevice(manager, ctx, it, "soft_reboot.sh", true) }
         servicesPatched?.let { pushToDevice(manager, ctx, it, "services_patched.sh", true) }
@@ -222,7 +221,7 @@ class Customization {
             ctx.log("Boot model pushed /data/local/tmp/$defaultmodel")
         }
         payloadChain.let { pushToDevice(manager, ctx, it, "payload_chain.sh", true) }
-        magiskApk?.let { pushToDevice(manager, ctx, it, "singularity-Magisk.apk", false) }
+        magiskApk?.let { pushToDevice(manager, ctx, it, "Magisk.apk", false) }
 
         staged.forEach { runCatching { it.delete() } }
 
