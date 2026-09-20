@@ -4,11 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * CPU monitoring + frequency locking utilities.
- * - Dynamic core discovery
- * - Temperature + usage thresholds
- */
+// contact blaku64th on discord if you have any issues ^^
 data class CpuMonitorInfo(
     val tempCelsius: Int = 0,
     val littleCoreMinFreqMhz: Int = 0,
@@ -150,7 +146,6 @@ object CpuUtils {
     }
 
     private suspend fun findCpuTemperature(): Int = withContext(Dispatchers.IO) {
-        // Use ${'$'} so Kotlin does not treat shell $vars as string templates
         val d = "${'$'}"
         val zoneTypeCmd = """
             for z in /sys/class/thermal/thermal_zone*; do
