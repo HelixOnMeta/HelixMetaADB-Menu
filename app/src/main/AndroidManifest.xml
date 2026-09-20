@@ -412,6 +412,10 @@
     <uses-permission android:name="horizonos.permission.SYSTEM_KEY_DISPLAY_MODE_SWITCH"/>
     <uses-permission android:name="horizonos.permission.SYSTEM_KEY_HOME_BUTTON"/>
     <uses-permission android:name="com.oculus.panelapp.messenger.permission.LAUNCH_HOLOGRAM_PANEL"/>
+
+    <uses-permission android:name="oculus.permission.CONTROL_DEVICE_IDLE"/>
+    <uses-permission android:name="com.oculus.permission.INSTALL_APEX"/>
+    <uses-permission android:name="com.oculus.permission.INSTALL_DOWNGRADED_PACKAGES"/>
     <uses-permission android:name="horizonos.permission.BLUETOOTH_BATTERY_ACCESS"/>
     <uses-permission android:name="horizonos.permission.INTERCEPT_GLOBAL_DRAG_AND_DROP"/>
     <uses-permission android:name="android.permission.DISABLE_INPUT_DEVICE"
