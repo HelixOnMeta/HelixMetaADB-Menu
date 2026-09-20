@@ -33,6 +33,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.tabs.TabLayout
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,6 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 
-// contact blaku64th on discord if you have any issues ^^
 class MainActivity : AppCompatActivity() {
 
     lateinit var actionContext: Utils.ActionContext
@@ -103,7 +103,6 @@ class MainActivity : AppCompatActivity() {
             field = value
             updateOpenSettingsVisibility()
             if (value && !was) {
-                // First successful connect this session → grant WRITE_SECURE_SETTINGS
                 lifecycleScope.launch { onAdbConnectedGrantSecureSettings() }
                 if (intent?.getBooleanExtra(BootReceiver.fromboot, false) == true) {
                     maybeRunBootMacros("connect-after-boot")
@@ -134,7 +133,6 @@ class MainActivity : AppCompatActivity() {
 
         actionContext = object : Utils.ActionContext {
             override fun run(command: String): String {
-                // Prefer local root / sh (real Linux), fall back to ADB shell
                 return ShellExecutor.run(
                     command = command,
                     preferRoot = true,
@@ -146,28 +144,39 @@ class MainActivity : AppCompatActivity() {
         }
 
         bindViews()
+        ThemeManager.applyToActivity(this)
         wireTabs()
         wireConsoleTab()
         wirePresetsTab()
         wireInputTestTab()
         prefillFromPrefs()
         isAdbConnected = false
-        // Try to flip wireless ADB on before discovery (needs WRITE_SECURE_SETTINGS once granted)
-        tryEnableWirelessDebugging()
+        if (Prefs.wirelessDebugOnStart(this)) {
+            tryEnableWirelessDebugging()
+        }
+        // Re-apply charge limit if user enabled it
+        runCatching {
+            if (Prefs.chargeLimitEnabled(this)) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val r = ChargeLimit.applySaved(this@MainActivity)
+                    runOnUiThread {
+                        if (r.ok) appendOutput("[ChargeLimit] ${r.percent}% via ${r.method}\n")
+                        else appendOutput("[ChargeLimit] failed: ${r.detail}\n")
+                    }
+                }
+            }
+        }
         maybeAutoConnect()
         startReconnectLoop()
         runIntroAnimation()
         startBatteryPolling()
 
-        // If launched by BootReceiver, run boot macros once ADB is up (or best-effort now)
         if (intent?.getBooleanExtra(BootReceiver.fromboot, false) == true) {
             appendOutput("[Boot] launched from BootReceiver\n")
-            // Delay until reconnect may succeed
             lifecycleScope.launch {
                 kotlinx.coroutines.delay(5_000L)
                 if (isAdbConnected) maybeRunBootMacros("boot")
                 else {
-                    // Still try after another wait while reconnect loop runs
                     kotlinx.coroutines.delay(15_000L)
                     if (isAdbConnected) maybeRunBootMacros("boot-delayed")
                     else appendOutput("[BootMacros] skipped — ADB not connected yet\n")
@@ -176,28 +185,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Wireless debugging helpers ──────────────────────────────────────────
-
-    /** Best-effort enable of wireless ADB via Settings.Global. Needs WRITE_SECURE_SETTINGS. */
-    fun tryEnableWirelessDebugging(): Boolean {
+    fun tryEnableWirelessDebugging(logFailure: Boolean = false): Boolean {
         return try {
             val okWifi = Settings.Global.putInt(contentResolver, "adb_wifi_enabled", 1)
             val okAdb = runCatching {
                 Settings.Global.putInt(contentResolver, Settings.Global.ADB_ENABLED, 1)
             }.getOrDefault(false)
-            if (okWifi || okAdb) {
-                appendOutput("Wireless debugging flag set (adb_wifi_enabled)\n")
-                true
-            } else {
-                appendOutput("putInt(adb_wifi_enabled) returned false\n")
-                false
+            okWifi || okAdb
+        } catch (_: SecurityException) {
+            if (logFailure) {
+                appendOutput("Note: WRITE_SECURE_SETTINGS not granted (optional — connecting anyway)\n")
             }
-        } catch (e: SecurityException) {
-            appendOutput("SecurityException enabling wireless ADB: ${e.message}\n")
-            appendOutput("Missing WRITE_SECURE_SETTINGS — will grant after first ADB connect\n")
             false
         } catch (e: Exception) {
-            appendOutput("Error enabling wireless ADB: ${e.message}\n")
+            if (logFailure) appendOutput("Could not auto-enable wireless ADB: ${e.message}\n")
             false
         }
     }
@@ -206,12 +207,68 @@ class MainActivity : AppCompatActivity() {
         setStatus("Enable Wireless Debugging in Developer options")
         appendOutput(
             "→ Open Settings → System → Developer → Wireless debugging (ON)\n" +
-            "→ Then Pair with pairing code, or hit Connect\n"
+                    "→ Then Pair with pairing code, or hit Connect\n"
         )
         toast("Enable Wireless Debugging in Settings")
     }
 
-    /** After ADB is live, grant WRITE_SECURE_SETTINGS so next boot can flip adb_wifi_enabled. */
+    suspend fun resolveConnectEndpoint(preferFreshDiscovery: Boolean = true): AdbDiscovery.Endpoint? {
+        if (preferFreshDiscovery) {
+            val discovered = withContext(Dispatchers.IO) {
+                runCatching { AdbDiscovery.discoverConnectEndpoint(applicationContext) }.getOrNull()
+            }
+            if (discovered != null) {
+                etConnectHost.setText(discovered.host)
+                etConnectPort.setText(discovered.port.toString())
+                return discovered
+            }
+        }
+
+        var host = etConnectHost.text.toString().trim()
+        var port = etConnectPort.text.toString().trim().toIntOrNull()
+        if (host.isNotEmpty() && port != null && port in 1..65535) {
+            return AdbDiscovery.Endpoint(host, port)
+        }
+
+        host = Prefs.loadConnectHost(this).trim()
+        port = Prefs.loadConnectPort(this).trim().toIntOrNull()
+        if (host.isNotEmpty() && port != null && port in 1..65535) {
+            etConnectHost.setText(host)
+            etConnectPort.setText(port.toString())
+            return AdbDiscovery.Endpoint(host, port)
+        }
+        return null
+    }
+
+    suspend fun attemptConnect(host: String, port: Int): Pair<Boolean, String?> {
+        val primary = withContext(Dispatchers.IO) {
+            runCatching { manager.connect(host, port) }
+        }
+        primary.onSuccess { ok ->
+            if (ok) return true to null
+        }.onFailure { e ->
+            val msg = e.message
+            if (host == "127.0.0.1" || host == "localhost") {
+                return false to msg
+            }
+        }
+
+        if (host != "127.0.0.1" && host != "localhost") {
+            val local = withContext(Dispatchers.IO) {
+                runCatching { manager.connect("127.0.0.1", port) }
+            }
+            local.onSuccess { ok ->
+                if (ok) {
+                    etConnectHost.setText("127.0.0.1")
+                    return true to null
+                }
+            }.onFailure { }
+        }
+
+        return (false to primary.exceptionOrNull()?.message
+            ?: if (primary.getOrNull() == false) "connect returned false" else null) as Pair<Boolean, String?>
+    }
+
     suspend fun onAdbConnectedGrantSecureSettings() {
         if (secureSettingsGrantedThisSession) return
         withContext(Dispatchers.IO) {
@@ -231,13 +288,11 @@ class MainActivity : AppCompatActivity() {
                         output.contains("SecurityException", ignoreCase = true) ||
                         output.startsWith("ERROR:")
                 if (failed && output.isNotBlank()) {
-                    appendOutput("Grant WRITE_SECURE_SETTINGS failed: $output\n")
+                    appendOutput("Optional WRITE_SECURE_SETTINGS grant skipped — connect still works without it\n")
                 } else {
                     secureSettingsGrantedThisSession = true
                     appendOutput("Granted WRITE_SECURE_SETTINGS to $pkg\n")
-                    // Immediately try to turn wireless debugging on for future sessions
-                    tryEnableWirelessDebugging()
-                    toast("Permission granted — wireless ADB can auto-enable next time")
+                    tryEnableWirelessDebugging(logFailure = false)
                 }
             }
         }
@@ -246,7 +301,6 @@ class MainActivity : AppCompatActivity() {
     fun startReconnectLoop() {
         if (reconnectJob?.isActive == true) return
         if (isAdbConnected) return
-        // Only auto-retry if we've paired before
         val everPaired = Prefs.hasPairedBefore(this) || Prefs.wasLastConnectSuccessful(this)
         if (!everPaired) return
 
@@ -254,8 +308,7 @@ class MainActivity : AppCompatActivity() {
             while (isActive && !isAdbConnected) {
                 delay(5_000L)
                 if (isAdbConnected) break
-                // Keep trying to set the flag (works once permission is granted)
-                tryEnableWirelessDebugging()
+                tryEnableWirelessDebugging(logFailure = false)
                 setStatus("Reconnecting every 5s…")
                 doConnect(auto = true, fromReconnect = true)
             }
@@ -267,7 +320,6 @@ class MainActivity : AppCompatActivity() {
         reconnectJob = null
     }
 
-    /** Run saved macros if "Run Macros on Boot" is on and we arrived from BootReceiver or first connect after boot. */
     fun maybeRunBootMacros(reason: String = "connect") {
         if (!Macros.isBootEnabled(this)) return
         val list = Macros.macrosForBoot(this)
@@ -302,13 +354,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     suspend fun refreshBatteryOnce() {
-        // Always try local host battery (works without ADB when Helix runs on Quest)
         val local = withContext(Dispatchers.IO) {
             runCatching { LocalDevice.readHostBattery(applicationContext) }.getOrNull()
         }
 
         if (!isAdbConnected) {
-            // Controllers unknown offline — only fill headset from local API
             applyBatteryReading(
                 BatteryStatus.Reading(
                     headset = local?.percent,
@@ -325,7 +375,6 @@ class MainActivity : AppCompatActivity() {
             battery to remote
         }
         val adbReading = BatteryStatus.parse(batteryDump, remoteDump)
-        // Prefer ADB headset level when available; fall back to local
         applyBatteryReading(
             BatteryStatus.Reading(
                 headset = adbReading.headset ?: local?.percent,
@@ -445,17 +494,14 @@ class MainActivity : AppCompatActivity() {
 
     fun playOpenAnimation() {
         val root = viewId("contentContainer")
-        root.scaleX = 0.82f
-        root.scaleY = 0.82f
-        root.alpha = 0f
-        root.animate()
-            .scaleX(1f)
-            .scaleY(1f)
-            .alpha(1f)
-            .setStartDelay(20L)
-            .setDuration(260L)
-            .setInterpolator(OvershootInterpolator(1.8f))
-            .start()
+        val consoleInner = (tabConsoleRoot as? android.view.ViewGroup)?.let { scroll ->
+            (0 until scroll.childCount).map { scroll.getChildAt(it) }
+                .filterIsInstance<android.view.ViewGroup>()
+                .firstOrNull()
+        }
+        Anim.playOpen(root, staggerRoot = consoleInner, duration = 320L)
+        // Press feedback already bound in bindViews; re-bind tree after layout
+        root.post { Anim.bindPressFeedbackToTree(root) }
     }
 
     fun bindViews() {
@@ -591,6 +637,7 @@ class MainActivity : AppCompatActivity() {
 
         inputTestController = InputTesting(this, content, lifecycleScope, testCtx).also { it.build() }
     }
+
     private fun openShell(cmd: String): String =
         openService(if (cmd.isEmpty()) "shell:" else "shell:$cmd")
 
@@ -609,6 +656,7 @@ class MainActivity : AppCompatActivity() {
         if (port !in 1..65535) return null
         return m.groupValues[1] to port
     }
+
     fun changeBootAnim(
         ctx: Utils.ActionContext
     ) {
@@ -634,8 +682,10 @@ class MainActivity : AppCompatActivity() {
             assets
         )
     }
+
     private fun firstNonEmpty(vararg parts: String): String =
         parts.first { it.isNotEmpty() }
+
     fun wireConsoleTab() {
         btnPair.setOnClickListener { doPair() }
         btnConnect.setOnClickListener { doConnect() }
@@ -649,10 +699,15 @@ class MainActivity : AppCompatActivity() {
             try {
                 AppContext.app.startActivity(intent)
             } catch (e: Exception) {
-                val fallbackIntent = Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                val context = AppContext.app
+                val intent = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    "package:com.android.settings".toUri()
+                ).apply {
+                    setPackage("com.android.settings")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                AppContext.app.startActivity(fallbackIntent)
+                context.startActivity(intent)
             }
         }
         etCommand.setOnEditorActionListener { _, actionId, _ ->
@@ -672,6 +727,9 @@ class MainActivity : AppCompatActivity() {
         listOf(btnPair, btnConnect, btnRun, btnOpenSettings, tvBatteryRefresh)
             .forEach { Anim.bindPressFeedback(it) }
     }
+
+    private var presetsController: PresetsController? = null
+
     fun wirePresetsTab() {
         val presetsCtx = object : Utils.ActionContext {
             override fun run(command: String): String {
@@ -691,7 +749,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        PresetsController(this, presetsContainer, lifecycleScope, presetsCtx).build()
+        presetsController = PresetsController(this, presetsContainer, lifecycleScope, presetsCtx).also {
+            it.build()
+        }
+    }
+
+    /** Re-apply theme colors to presets UI + hero background (called after theme change). */
+    fun rebuildPresetsTheme() {
+        ThemeManager.applyToActivity(this)
+        presetsController?.build()
+        runCatching {
+            if (::btnPair.isInitialized) ThemeManager.stylePrimaryButton(btnPair)
+            if (::btnConnect.isInitialized) ThemeManager.stylePrimaryButton(btnConnect)
+            if (::btnRun.isInitialized) ThemeManager.stylePrimaryButton(btnRun)
+            if (::btnOpenSettings.isInitialized) ThemeManager.styleOutlineButton(btnOpenSettings)
+            if (::tvStatus.isInitialized) ThemeManager.styleLabel(tvStatus, primary = true)
+        }
     }
 
     fun prefillFromPrefs() {
@@ -712,22 +785,7 @@ class MainActivity : AppCompatActivity() {
         setStatus("Looking for paired device…")
         ensureDiscoveryPermission {
             lifecycleScope.launch {
-                tryEnableWirelessDebugging()
-                val discovered = withContext(Dispatchers.IO) {
-                    runCatching { AdbDiscovery.discoverConnectEndpoint(applicationContext) }.getOrNull()
-                }
-                if (discovered != null) {
-                    etConnectHost.setText(discovered.host)
-                    etConnectPort.setText(discovered.port.toString())
-                }
-
-                val host = etConnectHost.text.toString().trim()
-                val port = etConnectPort.text.toString().trim().toIntOrNull()
-                if (host.isEmpty() || port == null) {
-                    setStatus("No wireless ADB found — enable Wireless Debugging in Settings")
-                    promptEnableWirelessDebugging()
-                    return@launch
-                }
+                tryEnableWirelessDebugging(logFailure = false)
                 doConnect(auto = true)
             }
         }
@@ -748,6 +806,7 @@ class MainActivity : AppCompatActivity() {
             nearbyWifiPermissionLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
     }
+
     fun doPair() {
 
         val code = etPairCode.text
@@ -836,96 +895,51 @@ class MainActivity : AppCompatActivity() {
                         true
                     )
 
-                    setStatus(
-                        "Paired. Finding ADB…"
-                    )
+                    setStatus("Paired. Finding ADB…")
 
-                    val connectEndpoint =
-                        withContext(Dispatchers.IO) {
-                            runCatching {
-                                AdbDiscovery.discoverConnectEndpoint(
-                                    applicationContext
-                                )
-                            }.getOrNull()
+                    var connectEndpoint = withContext(Dispatchers.IO) {
+                        runCatching {
+                            AdbDiscovery.discoverConnectEndpoint(applicationContext)
+                        }.getOrNull()
+                    }
+                    if (connectEndpoint == null) {
+                        val savedHost = Prefs.loadConnectHost(this@MainActivity).trim()
+                        val savedPort = Prefs.loadConnectPort(this@MainActivity).trim().toIntOrNull()
+                        if (savedHost.isNotEmpty() && savedPort != null && savedPort in 1..65535) {
+                            connectEndpoint = AdbDiscovery.Endpoint(savedHost, savedPort)
+                            appendOutput("mDNS miss after pair — trying saved $savedHost:$savedPort\n")
                         }
+                    }
 
                     if (connectEndpoint == null) {
-
-                        setStatus(
-                            "Paired, but ADB connection was not found"
-                        )
-
+                        setStatus("Paired ✓ — tap Connect when a port is shown")
+                        appendOutput("Paired OK. Connect service not visible yet; leave Wireless Debugging on and tap Connect.\n")
+                        startReconnectLoop()
                         return@onSuccess
                     }
 
                     val connectHost = connectEndpoint.host
                     val connectPort = connectEndpoint.port
-
                     etConnectHost.setText(connectHost)
-                    etConnectPort.setText(
-                        connectPort.toString()
-                    )
+                    etConnectPort.setText(connectPort.toString())
+                    Prefs.saveConnect(this@MainActivity, connectHost, connectPort.toString())
+                    setStatus("Connecting to $connectHost:$connectPort…")
 
-                    Prefs.saveConnect(
-                        this@MainActivity,
-                        connectHost,
-                        connectPort.toString()
-                    )
-
-                    setStatus(
-                        "Connecting to $connectHost:$connectPort…"
-                    )
-
-                    val connectResult =
-                        withContext(Dispatchers.IO) {
-                            runCatching {
-                                manager.connect(
-                                    connectHost,
-                                    connectPort
-                                )
-                            }
-                        }
-
-                    connectResult.onSuccess { connected ->
-
-                        Prefs.saveConnectSucceeded(
-                            this@MainActivity,
-                            connected
-                        )
-
-                        isAdbConnected = connected
-
-                        if (connected) {
-                            setStatus("Connected ✓")
-                            lifecycleScope.launch {
-                                refreshBatteryOnce()
-                                // isAdbConnected setter also triggers grant
-                            }
-                        } else {
-                            setStatus("Paired, but ADB connection failed — enable Wireless Debugging")
-                            promptEnableWirelessDebugging()
-                            startReconnectLoop()
-                        }
-
-                    }.onFailure { error ->
-
-                        Prefs.saveConnectSucceeded(
-                            this@MainActivity,
-                            false
-                        )
-
-                        isAdbConnected = false
-
-                        setStatus(
-                            "Connection error: ${error.message}"
-                        )
+                    val (connected, err) = attemptConnect(connectHost, connectPort)
+                    Prefs.saveConnectSucceeded(this@MainActivity, connected)
+                    isAdbConnected = connected
+                    if (connected) {
+                        val shown = etConnectHost.text.toString().trim().ifEmpty { connectHost }
+                        setStatus("Connected ✓  $shown:$connectPort")
+                        lifecycleScope.launch { refreshBatteryOnce() }
+                    } else {
+                        setStatus("Paired ✓ — connect failed, retrying…")
+                        appendOutput("Pair OK but connect failed${err?.let { " ($it)" } ?: ""}. Will retry.\n")
+                        startReconnectLoop()
                     }
 
                 }.onFailure { error ->
-
-                    setStatus(
-                        "Pairing error: ${error.message}"
-                    )
+                    setStatus("Pairing error: ${error.message}")
                 }
             }
         }
@@ -937,69 +951,75 @@ class MainActivity : AppCompatActivity() {
         }
         ensureDiscoveryPermission {
             lifecycleScope.launch {
-                // Always try the secure setting first (no-op without permission)
-                tryEnableWirelessDebugging()
-
-                val discovered = withContext(Dispatchers.IO) {
-                    runCatching { AdbDiscovery.discoverConnectEndpoint(applicationContext) }.getOrNull()
+                tryEnableWirelessDebugging(logFailure = false)
+                var endpoint = resolveConnectEndpoint(preferFreshDiscovery = true)
+                if (endpoint == null) {
+                    endpoint = resolveConnectEndpoint(preferFreshDiscovery = false)
                 }
 
-                var host = discovered?.host?.trim().orEmpty()
-                var port = discovered?.port
-
-                if (host.isEmpty() || port == null) {
-                    host = etConnectHost.text.toString().trim()
-                    port = etConnectPort.text.toString().trim().toIntOrNull()
-                } else {
-                    etConnectHost.setText(host)
-                    etConnectPort.setText(port.toString())
-                }
-
-                if (host.isEmpty() || port == null) {
-                    setStatus("No wireless ADB found — enable it in Developer options")
+                if (endpoint == null) {
                     if (!fromReconnect) {
-                        appendOutput("Connect failed: wireless debugging not advertising. Enable it in Settings.\n")
-                        promptEnableWirelessDebugging()
+                        setStatus("No ADB endpoint found")
+                        appendOutput(
+                            "mDNS found nothing and no host:port is saved.\n" +
+                                    "Leave Wireless Debugging ON and tap Connect, or Pair once.\n"
+                        )
+                        if (!Prefs.hasPairedBefore(this@MainActivity) &&
+                            Prefs.loadConnectPort(this@MainActivity).isBlank()
+                        ) {
+                            promptEnableWirelessDebugging()
+                        }
                     }
-                    // Keep reconnect loop running
                     if (!isAdbConnected) startReconnectLoop()
                     return@launch
                 }
 
+                var host = endpoint.host
+                var port = endpoint.port
                 Prefs.saveConnect(this@MainActivity, host, port.toString())
                 if (!fromReconnect) {
                     setStatus(if (auto) "Auto-connecting to $host:$port…" else "Connecting to $host:$port…")
                 }
 
-                val result = withContext(Dispatchers.IO) {
-                    runCatching { manager.connect(host, port) }
+                var (ok, err) = attemptConnect(host, port)
+
+                if (!ok) {
+                    appendOutput("Connect to $host:$port failed${err?.let { " ($it)" } ?: ""}. Rediscovering…\n")
+                    val fresh = withContext(Dispatchers.IO) {
+                        runCatching { AdbDiscovery.discoverConnectEndpoint(applicationContext) }.getOrNull()
+                    }
+                    if (fresh != null && (fresh.host != host || fresh.port != port)) {
+                        host = fresh.host
+                        port = fresh.port
+                        etConnectHost.setText(host)
+                        etConnectPort.setText(port.toString())
+                        Prefs.saveConnect(this@MainActivity, host, port.toString())
+                        setStatus("Retrying $host:$port…")
+                        val retry = attemptConnect(host, port)
+                        ok = retry.first
+                        err = retry.second
+                    }
                 }
-                result.onSuccess { ok ->
-                    Prefs.saveConnectSucceeded(this@MainActivity, ok)
-                    isAdbConnected = ok
+
+                Prefs.saveConnectSucceeded(this@MainActivity, ok)
+                isAdbConnected = ok
+                if (ok) {
+                    val shownHost = etConnectHost.text.toString().trim().ifEmpty { host }
+                    val shownPort = etConnectPort.text.toString().trim().toIntOrNull() ?: port
+                    setStatus("Connected ✓  $shownHost:$shownPort")
+                    lifecycleScope.launch { refreshBatteryOnce() }
+                } else {
                     setStatus(
                         when {
-                            ok -> "Connected ✓  $host:$port"
-                            auto || fromReconnect -> "Auto-connect failed — enable Wireless Debugging in Settings"
-                            else -> "Connect failed — is wireless debugging on?"
+                            auto || fromReconnect -> "Auto-connect failed ($host:$port) — will retry"
+                            else -> "Connect failed ($host:$port)"
                         }
                     )
-                    if (ok) {
-                        lifecycleScope.launch { refreshBatteryOnce() }
-                    } else if (!fromReconnect) {
-                        promptEnableWirelessDebugging()
-                        startReconnectLoop()
-                    }
-                }.onFailure { e ->
-                    Prefs.saveConnectSucceeded(this@MainActivity, false)
-                    isAdbConnected = false
-                    setStatus(
-                        if (auto || fromReconnect) "Auto-connect error: ${e.message}"
-                        else "Connect error: ${e.message}"
-                    )
                     if (!fromReconnect) {
-                        appendOutput("Connect error: ${e.message}\n")
-                        promptEnableWirelessDebugging()
+                        appendOutput(
+                            "Could not connect to $host:$port${err?.let { ": $it" } ?: ""}.\n" +
+                                    "Wireless Debugging port changes when you toggle it — leave it ON and retry.\n"
+                        )
                     }
                     startReconnectLoop()
                 }

@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -14,9 +15,13 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
@@ -26,9 +31,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
-// contact blaku64th on discord if you have any issues ^^
+/** Floating Mods overlay with tappable switches and section filters. */
 class ModMenu : Service() {
 
     companion object {
@@ -38,11 +42,7 @@ class ModMenu : Service() {
 
         fun start(ctx: android.content.Context) {
             val i = Intent(ctx, ModMenu::class.java)
-            try {
-                ctx.startForegroundService(i)
-            } catch (_: Exception) {
-                ctx.startService(i)
-            }
+            try { ctx.startForegroundService(i) } catch (_: Exception) { ctx.startService(i) }
         }
 
         fun stop(ctx: android.content.Context) {
@@ -54,42 +54,48 @@ class ModMenu : Service() {
     private val ui = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var inputJob: Job? = null
-
     private var wm: WindowManager? = null
     private var root: LinearLayout? = null
     private var added = false
     private var overlayOpen = false
-
-    private val PageSize = 7
-    private var page = 0
-    private var cursor = 0
-    private var lastStickNs = 0L
-    private var lastTrigger = false
-    private var lastStickClick = false
     private var lastHome = false
-    private val deadzone = 0.35f
-    private val stickms = 180L
-
-    private var items: List<Utils.CustomToggleAction> = emptyList()
+    private var allItems: List<Utils.CustomToggleAction> = emptyList()
     private val state = mutableMapOf<String, Boolean>()
-
     private var titleView: TextView? = null
+    private var sectionBar: LinearLayout? = null
     private var listContainer: LinearLayout? = null
-    private var hintView: TextView? = null
+
+    private data class Section(val id: String, val title: String, val keys: List<String>)
+    private val sections = listOf(
+        Section("all", "All", emptyList()),
+        Section("fly", "Fly", listOf("fly", "hover", "glide", "velocity", "orbit", "surf", "rocket")),
+        Section("arms", "Arms", listOf("long arms", "break hands", "tiny", "giant", "taller", "shorter", "side shift", "ipd")),
+        Section("cam", "Camera", listOf("cam", "camera", "third", "shoulder", "top down", "low angle", "spectate", "freeze", "ghost", "anchor")),
+        Section("move", "Move", listOf("wall", "up/down", "platform", "gravity", "grapple", "spaz", "swim", "strafe", "forward", "fall", "brake", "climb", "zig", "bunny", "dash")),
+        Section("rot", "Spin", listOf("spin", "upside", "backwards", "rotation", "head")),
+        Section("input", "Input", listOf("hold ", "finger", "grip spaz", "mash", "no finger", "stop all input")),
+        Section("util", "Util", listOf("overlay", "psa", "disarm", "checkpoint", "recall", "pose", "scale", "find inputs"))
+    )
+    private var activeSectionId = "all"
+    private val sectionChipViews = mutableMapOf<String, TextView>()
+    private var dragOffsetX = 0
+    private var dragOffsetY = 0
+    private var dragging = false
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         startForegroundNotification()
+        allItems = Catalog.mergedCustomToggles()
+            .filter { it.category == Utils.Category.MODS }
+            .filter { !it.label.equals("Mods Overlay", ignoreCase = true) }
+        allItems.forEach { state[it.label] = false }
         buildOverlay()
-        items = Catalog.mergedCustomToggles()
-        items.forEach { state[it.label] = false }
         startInputLoop()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
-
     override fun onDestroy() {
         inputJob?.cancel()
         runCatching { AdbButtonInput.release() }
@@ -97,7 +103,6 @@ class ModMenu : Service() {
         instance = null
         super.onDestroy()
     }
-
     override fun onBind(intent: Intent?): IBinder? = null
 
     fun shutdown() {
@@ -111,12 +116,10 @@ class ModMenu : Service() {
 
     private fun startForegroundNotification() {
         val nm = getSystemService(NotificationManager::class.java)
-        nm?.createNotificationChannel(
-            NotificationChannel(channel, "Mods Overlay", NotificationManager.IMPORTANCE_LOW)
-        )
+        nm?.createNotificationChannel(NotificationChannel(channel, "Mods Overlay", NotificationManager.IMPORTANCE_LOW))
         val notif = Notification.Builder(this, channel)
             .setContentTitle("Mods Overlay")
-            .setContentText("Left Home = open / close · stick ↕ select · click stick toggle")
+            .setContentText("Left Home = open/close · tap switches to toggle")
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setOngoing(true)
             .build()
@@ -125,97 +128,286 @@ class ModMenu : Service() {
 
     private fun dp(v: Float): Int = (v * resources.displayMetrics.density).toInt()
 
+    private fun rounded(fill: Int, radiusDp: Float, stroke: Int = 0, strokeDp: Float = 0f): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radiusDp * resources.displayMetrics.density
+            setColor(fill)
+            if (strokeDp > 0f) setStroke((strokeDp * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
+        }
+    }
+
     private fun buildOverlay() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14f), dp(12f), dp(14f), dp(12f))
-            background = GradientDrawable().apply {
-                setColor(0xE6111118.toInt())
-                cornerRadius = dp(18f).toFloat()
-                setStroke(dp(1.5f), 0xFF00E5FF.toInt())
-            }
+            setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+            background = rounded(0xF2111118.toInt(), 18f, 0xFF00E5FF.toInt(), 1.5f)
         }
-
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(6f))
+        }
         titleView = TextView(this).apply {
-            textSize = 15f
+            text = "Mods"
+            textSize = 16f
             setTextColor(Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, dp(4f))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        card.addView(titleView)
-
+        titleRow.addView(titleView)
+        titleRow.addView(TextView(this).apply {
+            text = "✕"
+            textSize = 16f
+            setTextColor(0xFF88AABB.toInt())
+            setPadding(dp(12f), dp(4f), dp(4f), dp(4f))
+            setOnClickListener { hide() }
+        })
+        card.addView(titleRow)
+        titleRow.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    dragging = true
+                    dragOffsetX = event.rawX.toInt()
+                    dragOffsetY = event.rawY.toInt()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!dragging || root == null || !added) return@setOnTouchListener false
+                    val lp = root!!.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
+                    val dx = event.rawX.toInt() - dragOffsetX
+                    val dy = event.rawY.toInt() - dragOffsetY
+                    dragOffsetX = event.rawX.toInt()
+                    dragOffsetY = event.rawY.toInt()
+                    lp.x += dx; lp.y += dy
+                    try { wm?.updateViewLayout(root, lp) } catch (_: Exception) {}
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { dragging = false; true }
+                else -> false
+            }
+        }
+        val chipScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(0, 0, 0, dp(8f))
+        }
+        sectionBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        chipScroll.addView(sectionBar)
+        card.addView(chipScroll)
+        rebuildSectionChips()
         val scroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-            )
-            isVerticalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+            isVerticalScrollBarEnabled = true
         }
-        listContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
+        listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(listContainer)
         card.addView(scroll)
-
-        hintView = TextView(this).apply {
+        card.addView(TextView(this).apply {
             textSize = 10f
             setTextColor(0xFF88AABB.toInt())
             typeface = Typeface.MONOSPACE
             setPadding(0, dp(8f), 0, 0)
-            text = "stick↕ select  stick↔ page  stick-click toggle  Home close"
-        }
-        card.addView(hintView)
-
+            text = "Home = close · drag title · tap switch"
+        })
         root = card
-        root?.visibility = android.view.View.GONE
-        render()
+        root?.visibility = View.GONE
+        renderList()
+    }
+
+    private fun rebuildSectionChips() {
+        val bar = sectionBar ?: return
+        bar.removeAllViews()
+        sectionChipViews.clear()
+        for (sec in sections) {
+            val chip = TextView(this).apply {
+                text = sec.title
+                textSize = 12f
+                setPadding(dp(12f), dp(6f), dp(12f), dp(6f))
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.marginEnd = dp(6f)
+                layoutParams = lp
+                setOnClickListener {
+                    activeSectionId = sec.id
+                    styleChips()
+                    renderList()
+                }
+            }
+            sectionChipViews[sec.id] = chip
+            bar.addView(chip)
+        }
+        styleChips()
+    }
+
+    private fun styleChips() {
+        for ((id, chip) in sectionChipViews) {
+            val selected = id == activeSectionId
+            chip.setTextColor(if (selected) Color.BLACK else Color.WHITE)
+            chip.background = rounded(
+                if (selected) 0xFF00E5FF.toInt() else 0x332A2A35.toInt(),
+                20f,
+                if (selected) 0 else 0x44FFFFFF,
+                if (selected) 0f else 1f
+            )
+        }
+    }
+
+    private fun filteredItems(): List<Utils.CustomToggleAction> {
+        val sec = sections.firstOrNull { it.id == activeSectionId } ?: sections.first()
+        if (sec.id == "all" || sec.keys.isEmpty()) return allItems
+        return allItems.filter { item ->
+            val l = item.label.lowercase()
+            sec.keys.any { k -> l.contains(k) }
+        }
+    }
+
+    private fun renderList() {
+        ui.post {
+            val container = listContainer ?: return@post
+            container.removeAllViews()
+            val items = filteredItems()
+            titleView?.text = "Mods · ${items.size}"
+            if (items.isEmpty()) {
+                container.addView(TextView(this).apply {
+                    text = "No mods in this section"
+                    setTextColor(0xFF88AABB.toInt())
+                    textSize = 13f
+                    setPadding(dp(8f), dp(16f), dp(8f), dp(16f))
+                })
+                return@post
+            }
+            if (activeSectionId == "all") {
+                for (sec in sections.filter { it.id != "all" }) {
+                    val group = items.filter { item ->
+                        val l = item.label.lowercase()
+                        sec.keys.any { k -> l.contains(k) }
+                    }
+                    if (group.isEmpty()) continue
+                    addGroupHeader(container, sec.title)
+                    group.forEach { addToggleRow(container, it) }
+                }
+                val used = sections.filter { it.id != "all" }.flatMap { sec ->
+                    items.filter { item ->
+                        val l = item.label.lowercase()
+                        sec.keys.any { k -> l.contains(k) }
+                    }.map { it.label }
+                }.toSet()
+                val rest = items.filter { it.label !in used }
+                if (rest.isNotEmpty()) {
+                    addGroupHeader(container, "Other")
+                    rest.forEach { addToggleRow(container, it) }
+                }
+            } else {
+                items.forEach { addToggleRow(container, it) }
+            }
+        }
+    }
+
+    private fun addGroupHeader(parent: LinearLayout, title: String) {
+        parent.addView(TextView(this).apply {
+            text = title.uppercase()
+            textSize = 11f
+            setTextColor(0xFF00E5FF.toInt())
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.08f
+            setPadding(dp(4f), dp(12f), dp(4f), dp(4f))
+        })
+    }
+
+    private fun addToggleRow(parent: LinearLayout, action: Utils.CustomToggleAction) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10f), dp(8f), dp(8f), dp(8f))
+            background = rounded(0xCC1A1A22.toInt(), 12f, 0x33FFFFFF, 1f)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.topMargin = dp(4f)
+            lp.bottomMargin = dp(4f)
+            layoutParams = lp
+        }
+        row.addView(TextView(this).apply {
+            text = action.label
+            textSize = 13.5f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, dp(8f), 0)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        val sw = Switch(this).apply {
+            isChecked = state[action.label] == true
+            thumbTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf(-android.R.attr.state_checked)),
+                intArrayOf(0xFF00E5FF.toInt(), 0xFF666677.toInt())
+            )
+            trackTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf(-android.R.attr.state_checked)),
+                intArrayOf(0xFF00E5FF.toInt(), 0xFF2A2A35.toInt())
+            )
+            setOnCheckedChangeListener { _, checked ->
+                val was = state[action.label] == true
+                if (checked == was) return@setOnCheckedChangeListener
+                state[action.label] = checked
+                fireToggle(action, checked)
+            }
+        }
+        row.addView(sw)
+        row.setOnClickListener { sw.isChecked = !sw.isChecked }
+        parent.addView(row)
+    }
+
+    private fun actionContext(): Utils.ActionContext = object : Utils.ActionContext {
+        override fun run(command: String): String {
+            return try {
+                val mgr = AppAdbConnectionManager.getInstance(applicationContext)
+                val stream = mgr.openStream("shell:$command")
+                try { stream.openInputStream().bufferedReader().use { it.readText() } }
+                finally { runCatching { stream.close() } }
+            } catch (e: Exception) {
+                ShellExecutor.run(command, preferRoot = true, adbManager = null)
+            }
+        }
+        override fun log(message: String) {}
+        override fun toast(message: String) {
+            ui.post { Toast.makeText(this@ModMenu, message, Toast.LENGTH_SHORT).show() }
+        }
+    }
+
+    private fun fireToggle(action: Utils.CustomToggleAction, on: Boolean) {
+        val ctx = actionContext()
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (on) action.onEnabled.run(ctx) else action.onDisabled.run(ctx)
+            } catch (t: Throwable) {
+                ui.post { toast("Error: ${t.message}") }
+            }
+        }
     }
 
     private fun params(): WindowManager.LayoutParams {
         return WindowManager.LayoutParams(
-            dp(320f),
-            dp(380f),
-            2038,
+            dp(340f), dp(460f), 2038,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.CENTER
-            title = "ModMenuOverlay"
-        }
+        ).apply { gravity = Gravity.CENTER; title = "ModMenuOverlay" }
     }
 
     fun show() {
-        if (!Settings.canDrawOverlays(this)) {
-            toast("Overlay permission required")
-            return
-        }
+        if (!Settings.canDrawOverlays(this)) { toast("Overlay permission required"); return }
         if (root == null) return
-
         if (!added) {
-            try {
-                wm?.addView(root, params())
-                added = true
-            } catch (e: Exception) {
-                toast("addView failed: ${e.message}")
-                return
-            }
+            try { wm?.addView(root, params()); added = true }
+            catch (e: Exception) { toast("addView failed: ${e.message}"); return }
         }
         overlayOpen = true
-        lastStickClick = true // ignore held click when opening
-        lastTrigger = true
-        root?.visibility = android.view.View.VISIBLE
-        try {
-            wm?.updateViewLayout(root, params())
-        } catch (_: Exception) {}
-        render()
+        root?.visibility = View.VISIBLE
+        try { wm?.updateViewLayout(root, params()) } catch (_: Exception) {}
+        renderList()
     }
 
     fun hide() {
         overlayOpen = false
-        root?.visibility = android.view.View.GONE
+        root?.visibility = View.GONE
     }
 
     private fun detach() {
@@ -223,199 +415,23 @@ class ModMenu : Service() {
             try { wm?.removeView(root) } catch (_: Exception) {}
             added = false
         }
+        root?.visibility = View.GONE
     }
-
-    private fun render() {
-        ui.post {
-            val totalPages = pageCount()
-            titleView?.text = "Mods  ${page + 1}/$totalPages"
-
-            listContainer?.removeAllViews()
-            val start = page * PageSize
-            val end = (start + PageSize).coerceAtMost(items.size)
-
-            for (i in start until end) {
-                val local = i - start
-                val item = items[i]
-                val selected = local == cursor
-                val on = state[item.label] == true
-
-                val row = TextView(this).apply {
-                    textSize = 13.5f
-                    typeface = Typeface.MONOSPACE
-                    setPadding(dp(6f), dp(7f), dp(6f), dp(7f))
-                    setTextColor(if (selected) 0xFF00E5FF.toInt() else Color.WHITE)
-                    background = if (selected) {
-                        GradientDrawable().apply {
-                            setColor(0x3300E5FF)
-                            cornerRadius = dp(8f).toFloat()
-                        }
-                    } else null
-
-                    val arrow = if (selected) "→ " else "  "
-                    val mark = if (on) "  <>" else ""
-                    text = "$arrow${item.label}$mark"
-                }
-                listContainer?.addView(row)
-            }
-        }
-    }
-
-    private fun pageCount() =
-        if (items.isEmpty()) 1 else (items.size + PageSize - 1) / PageSize
-
-    private fun pageItemCount(): Int {
-        val start = page * PageSize
-        return (items.size - start).coerceIn(0, PageSize)
-    }
-
-    private fun absoluteIndex() = page * PageSize + cursor
 
     private fun startInputLoop() {
         AdbButtonInput.acquire()
-
         inputJob = scope.launch {
             while (isActive) {
-                // Left Home (or Menu) — open when closed, close when open
                 val home = runCatching {
                     Input.leftHome() || Input.leftMenu() || AdbButtonInput.Home || AdbButtonInput.Menu
                 }.getOrDefault(false)
                 if (home && !lastHome) {
-                    ui.post {
-                        if (overlayOpen) hide() else show()
-                    }
+                    ui.post { if (overlayOpen) hide() else show() }
                 }
                 lastHome = home
-
-                if (overlayOpen) {
-                    handleStick()
-                    handleToggle()
-                }
                 delay(40L)
             }
         }
-    }
-
-    /** Prefer left stick; fall back to right stick axes. */
-    private fun readStickXY(): Pair<Float, Float> {
-        val lx = Input.leftThumbstickX()
-        val ly = Input.leftThumbstickY()
-        val rx = Input.rightThumbstickX()
-        val ry = Input.rightThumbstickY()
-        // Use left if it has meaningful deflection, else right
-        return if (abs(lx) > 0.12f || abs(ly) > 0.12f) lx to ly else rx to ry
-    }
-
-    private fun handleStick() {
-        val now = System.nanoTime()
-        if (now - lastStickNs < stickms * 1_000_000L) return
-
-        val (lx, lyRaw) = readStickXY()
-        // Quest / getevent Y is often inverted vs classic gamepad; try physical "up" as both signs.
-        // Primary: negative Y = up (standard). If user pushes the other way, still works via positive branch.
-        val ly = lyRaw
-
-        // Vertical first (select) when |Y| dominates |X|
-        if (abs(ly) >= abs(lx) && abs(ly) > deadzone) {
-            lastStickNs = now
-            if (ly < -deadzone) {
-                // stick up → previous item
-                moveCursor(-1)
-            } else if (ly > deadzone) {
-                // stick down → next item
-                moveCursor(+1)
-            }
-            return
-        }
-
-        // Horizontal = page
-        if (abs(lx) > deadzone) {
-            lastStickNs = now
-            if (lx < -deadzone) {
-                if (page > 0) {
-                    page--
-                    cursor = cursor.coerceAtMost((pageItemCount() - 1).coerceAtLeast(0))
-                    render()
-                }
-            } else if (lx > deadzone) {
-                if (page < pageCount() - 1) {
-                    page++
-                    cursor = cursor.coerceAtMost((pageItemCount() - 1).coerceAtLeast(0))
-                    render()
-                }
-            }
-        }
-    }
-
-    private fun moveCursor(delta: Int) {
-        if (delta < 0) {
-            if (cursor > 0) {
-                cursor--
-                render()
-            } else if (page > 0) {
-                page--
-                cursor = (pageItemCount() - 1).coerceAtLeast(0)
-                render()
-            }
-        } else {
-            if (cursor < pageItemCount() - 1) {
-                cursor++
-                render()
-            } else if (page < pageCount() - 1) {
-                page++
-                cursor = 0
-                render()
-            }
-        }
-    }
-
-    private fun handleToggle() {
-        // Stick click (L or R) is primary; RT still works as backup
-        val stickClick = runCatching {
-            Input.leftThumbstickClick() || Input.rightThumbstickClick()
-        }.getOrDefault(false)
-        val trigger = runCatching { Input.rightTrigger() }.getOrDefault(false)
-
-        val pressed = stickClick || trigger
-        val wasPressed = lastStickClick || lastTrigger
-
-        if (pressed && !wasPressed) {
-            fireToggle()
-        }
-        lastStickClick = stickClick
-        lastTrigger = trigger
-    }
-
-    private fun fireToggle() {
-        val idx = absoluteIndex()
-        if (idx !in items.indices) return
-        val item = items[idx]
-        val nowOn = !(state[item.label] ?: false)
-        state[item.label] = nowOn
-
-        val ctx = object : Utils.ActionContext {
-            override fun run(command: String): String {
-                return try {
-                    val mgr = AppAdbConnectionManager.getInstance(applicationContext)
-                    val stream = mgr.openStream("shell:$command")
-                    val text = stream.openInputStream().bufferedReader().use { it.readText() }
-                    stream.close()
-                    text
-                } catch (e: Exception) {
-                    "[error] ${e.message}"
-                }
-            }
-            override fun log(message: String) {}
-            override fun toast(message: String) {
-                ui.post { Toast.makeText(this@ModMenu, message, Toast.LENGTH_SHORT).show() }
-            }
-        }
-
-        try {
-            if (nowOn) item.onEnabled.run(ctx)
-            else item.onDisabled.run(ctx)
-        } catch (_: Throwable) {}
-        render()
     }
 
     private fun toast(msg: String) {

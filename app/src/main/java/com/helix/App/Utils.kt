@@ -137,7 +137,7 @@ object Utils {
             ctx.log("Settings write may have failed")
         }
     }
-    enum class Category { MODS, VISUALS, HARDWARE, SETTINGS, RECORDING, MISC, OFFLINE, POWER }
+    enum class Category { MODS, VISUALS, HARDWARE, SETTINGS, RECORDING, MISC, OFFLINE, POWER, AUDIO }
 
     interface ActionContext {
         fun run(command: String): String
@@ -203,7 +203,6 @@ object Utils {
         val step: Float? = null
     )
 
-    /** Like CustomButtonAction but for SeekBars. onChange runs when the user releases the thumb. */
     fun interface CustomSliderHandler {
         fun onChange(ctx: ActionContext, value: Float)
     }
@@ -232,6 +231,7 @@ object Utils {
         ButtonAction("Restart Wi-Fi", Category.MISC, "svc wifi disable", "svc wifi enable"),
         ButtonAction("Disable Sensor", Category.HARDWARE, "am broadcast -a com.oculus.vrpowermanager.prox_close"),
         ButtonAction("Disable Link", Category.MISC, "am force-stop com.oculus.xrstreamingclient"),
+        ButtonAction("Bypass VSync", Category.HARDWARE, "setprop debug.oculus.vsyncEmu 1; settings put system peak_refresh_rate 200"),
         ButtonAction("Disable Guardian", Category.VISUALS, "setprop debug.oculus.guardian_pause 1"),
         ButtonAction(
             "Better Graphics", Category.VISUALS,
@@ -239,68 +239,83 @@ object Utils {
             "setprop debug.oculus.textureHeight 4096"
         ),
         ButtonAction(
-            "Better Performance", Category.HARDWARE,
-            "setprop debug.oculus.cpuLevel 7",
-            "setprop debug.oculus.gpuLevel 7"
-        ),
-        ButtonAction(
             "Disable Updates", Category.SETTINGS,
             "am force-stop com.oculus.updater",
+            "am force-stop com.oculus.nux.ota",
+            "am force-stop com.meta.updater",
             "pm disable-user --user 0 com.oculus.updater",
             "pm disable-user --user 0 com.oculus.nux.ota",
             "pm disable-user --user 0 com.meta.updater",
             """sed -i '/name="com\\.oculus\\.updater"/{s/enabled="1"/enabled="2"/;s/enabled="3"/enabled="2"/;/enabled="[23]"/!s/first-install-time/enabled="2" first-install-time/}' /data/system/users/0/package-restrictions.xml""",
-            """sed -i '/name="com\\.oculus\\.updater"/{s/enabled="1"/enabled="2"/;s/enabled="3"/enabled="2"/;/enabled="[23]"/!s/first-install-time/enabled="2" first-install-time/}' /data/system/users/0/package-restrictions.xml.reservecopy"""
+            """sed -i '/name="com\\.oculus\\.updater"/{s/enabled="1"/enabled="2"/;s/enabled="3"/enabled="2"/;/enabled="[23]"/!s/first-install-time/enabled="2" first-install-time/}' /data/system/users/0/package-restrictions.xml.reservecopy""",
+            "am force-stop com.oculus.companion.server/.DisabledDeviceJobService",
+            "am force-stop com.oculus.companion.server/.RemoteWipeJobService",
+            "am force-stop com.oculus.companion.server/.WipeReceiver",
+            "pm disable --user 0 com.oculus.companion.server/.DisabledDeviceJobService",
+            "pm disable --user 0 com.oculus.companion.server/.RemoteWipeJobService",
+            "pm disable --user 0 com.oculus.companion.server/.WipeReceiver",
+            """su 1000 -c "pm disable --user 0 com.oculus.companion.server/.DisabledDeviceJobService" """,
+            """su 1000 -c "pm disable --user 0 com.oculus.companion.server/.RemoteWipeJobService" """,
+            """su 1000 -c "pm disable --user 0 com.oculus.companion.server/.WipeReceiver" """,
         ),
         ButtonAction(
-            "Disable Telemetry", Category.SETTINGS,
+            "Disable Telemetry", Category.OFFLINE,
             "setprop debug.oculus.telemetry 0",
             "settings put global netstats_enabled 0",
             "settings put global data_roaming 0",
-            "persist.device_config.oculus_shared_os_services.oculus_enable_wakelock_telemetry false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_enable_native_telemetry false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_instruction_sampler_enabled false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_native_telemetry_legacy_sess_disable false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_native_telemetry_sessions false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_collector false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_drop_all_client_events false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_event_hc false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_hc_archived_upload false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_history_store false",
-            "persist.device_config.oculus_shared_os_services.mobile_telemetry_enable_network_manager false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_qpl_hc false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_upload_configs false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_event_filtering_dev false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_event_filtering_enabled false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_low_latency_allow_list false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_new_health_counter_enable false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_purge_event false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_session_donstate_redundant false",
-            "persist.device_config.oculus_shared_os_services.oculus_mobile_wifi_telemetry false",
-            "persist.device_config.oculus_shared_os_services.oculus_mr_gprips_telemetry_enabled false",
-            "persist.device_config.oculus_shared_os_services.oculus_mrss_sr_slam_points_quality_telemetry false",
-            "persist.device_config.oculus_shared_os_services.oculus_telemetry_block_new_events_from_ossdk false",
-            "persist.device_config.oculus_shared_os_services.oscontrol_enable_telemetry_session false",
-            "persist.device_config.oculus_shared_os_services_sessionless.arvr_gk_nimble_use_statsd_telemetry false",
-            "persist.device_config.oculus_shared_os_services_sessionless.arvr_gk_nimble_use_statsd_telemetry_iobt false",
-            "persist.device_config.oculus_shared_os_services_sessionless.hzos_wifi_telemetry_research false",
-            "persist.device_config.oculus_shared_os_services_sessionless.oculus_mobile_telemetry_log_train_version false",
-            "persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_add_screenstate false",
-            "persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_add_sensorlock false",
-            "persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_sessions_time_spent_pose_data false",
-            "persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_dynamic_statsd_allowlist false",
-            "persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_sessions_time_spent_timeout false",
-            "persist.traced.enable false",
-            "persist.dumpstate.verbose_logging.enabled false",
-            "persist.device_config.hzos_system_native.oculus_telemetry_cc_migration false",
-            "persist.device_config.oculus_shared_os_services_sessionless.sysprops_area_usage_reporting false",
-            "vendor.debug.time_services.enable false",
-            "persist.device_config.oculus_shared_os_services.horizon_advertising_id false",
-            "persist.device_config.oculus_shared_os_services.horizon_advertising_id_opt_in false",
-            "persist.device_config.oculus_shared_os_services.horizon_advertising_id_eligibility false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_enable_wakelock_telemetry false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_enable_native_telemetry false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_instruction_sampler_enabled false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_native_telemetry_legacy_sess_disable false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_native_telemetry_sessions false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_collector false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_drop_all_client_events false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_event_hc false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_hc_archived_upload false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_history_store false",
+            "setprop persist.device_config.oculus_shared_os_services.mobile_telemetry_enable_network_manager false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_qpl_hc false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_enable_upload_configs false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_event_filtering_dev false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_event_filtering_enabled false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_low_latency_allow_list false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_new_health_counter_enable false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_purge_event false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_telemetry_session_donstate_redundant false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_wifi_telemetry false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mr_gprips_telemetry_enabled false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_mrss_sr_slam_points_quality_telemetry false",
+            "setprop persist.device_config.oculus_shared_os_services.oculus_telemetry_block_new_events_from_ossdk false",
+            "setprop persist.device_config.oculus_shared_os_services.oscontrol_enable_telemetry_session false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.arvr_gk_nimble_use_statsd_telemetry false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.arvr_gk_nimble_use_statsd_telemetry_iobt false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.hzos_wifi_telemetry_research false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.oculus_mobile_telemetry_log_train_version false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_add_screenstate false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_add_sensorlock false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_sessions_time_spent_pose_data false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_dynamic_statsd_allowlist false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.oculus_telemetry_sessions_time_spent_timeout false",
+            "setprop persist.traced.enable false",
+            "setprop persist.dumpstate.verbose_logging.enabled false",
+            "setprop persist.device_config.hzos_system_native.oculus_telemetry_cc_migration false",
+            "setprop persist.device_config.oculus_shared_os_services_sessionless.sysprops_area_usage_reporting false",
+            "setprop persist.device_config.oculus_shared_os_services.horizon_advertising_id false",
+            "setprop persist.device_config.oculus_shared_os_services.horizon_advertising_id_opt_in false",
+            "setprop persist.device_config.oculus_shared_os_services.horizon_advertising_id_eligibility false",
             "setprop persist.device_config.oculus_shared_os_services.oculus_mobile_bpfagent_enabled false",
             "setprop persist.device_config.vros_vendor_sessionless.oculus_mobile_bpfagent_enabled false",
             "setprop persist.device_config.oculus_shared_os_services_sessionless.oc_bug_reporter_worlds false",
+            "setprop vendor.debug.time_services.enable false",
+            "am force-stop com.oculus.companion.server/.DisabledDeviceJobService",
+            "am force-stop com.oculus.companion.server/.RemoteWipeJobService",
+            "am force-stop com.oculus.companion.server/.WipeReceiver",
+            "pm disable --user 0 com.oculus.companion.server/.DisabledDeviceJobService",
+            "pm disable --user 0 com.oculus.companion.server/.RemoteWipeJobService",
+            "pm disable --user 0 com.oculus.companion.server/.WipeReceiver",
+            """su 1000 -c "pm disable --user 0 com.oculus.companion.server/.DisabledDeviceJobService" """,
+            """su 1000 -c "pm disable --user 0 com.oculus.companion.server/.RemoteWipeJobService" """,
+            """su 1000 -c "pm disable --user 0 com.oculus.companion.server/.WipeReceiver" """,
         ),
         ButtonAction(
             "LED – Red", Category.HARDWARE,
@@ -350,7 +365,7 @@ object Utils {
 
     val Toggles = listOf(
         ToggleAction("Disable Guardian", "setprop debug.oculus.guardian_pause 1", "setprop debug.oculus.guardian_pause 0", Category.VISUALS),
-        ToggleAction("Enable Overclocking", "setprop debug.oculus.allowGPU5 1; setprop debug.oculus.allowDynresGPUBoost 1; setprop debug.oculus.gpuLevel 7; setprop debug.oculus.cpuLevel 7; debug.oculus.forceThermal 1", "setprop debug.oculus.allowGPU5 0", Category.HARDWARE),
+        ToggleAction("Overclocking", "setprop debug.oculus.allowGPU5 1; setprop debug.oculus.allowDynresGPUBoost 1; setprop debug.oculus.gpuLevel 7; setprop debug.oculus.cpuLevel 7; debug.oculus.forceThermal 1", "setprop debug.oculus.allowGPU5 0; setprop debug.oculus.allowDynresGPUBoost 0; setprop debug.oculus.gpuLevel 2; setprop debug.oculus.cpuLevel 2; debug.oculus.forceThermal 0", Category.POWER),
         ToggleAction("Disable Phase Sync", "setprop debug.oculus.AutoDisablePhaseSync 1", "setprop debug.oculus.AutoDisablePhaseSync 0", Category.SETTINGS),
         ToggleAction("Enable Motion Smoothing", "setprop debug.oculus.forceSpaceWarp 1", "setprop debug.oculus.forceSpaceWarp 0", Category.VISUALS),
         ToggleAction("Full Capture Rate", "setprop debug.oculus.fullRateCapture 1", "setprop debug.oculus.fullRateCapture 0", Category.RECORDING),
@@ -361,7 +376,7 @@ object Utils {
 
     val CustomButtons = listOf(
 
-        CustomButtonAction("Root Setup", Category.HARDWARE) { ctx ->
+        CustomButtonAction("Root Linux Kernel (-V2.6)", Category.HARDWARE) { ctx ->
             IonStackRoot.runIonStack(ctx,false)
         },
         CustomButtonAction("Install Magisk (from GitHub)", Category.HARDWARE) { ctx ->
@@ -381,7 +396,7 @@ object Utils {
                 }
             }
         },
-        CustomButtonAction("V79 Legacy Root", Category.HARDWARE) { ctx ->
+        CustomButtonAction("Qualcomm Root (-V79)", Category.HARDWARE) { ctx ->
             IonStackRoot.runV79Root(ctx)
         },
         CustomButtonAction("Try Best Root", Category.HARDWARE) { ctx ->
@@ -413,10 +428,10 @@ object Utils {
                 ctx.log("Try running one of the root exploits above")
             }
         },
-        CustomButtonAction("BL Unlock Status V29", Category.HARDWARE) { ctx ->
+        CustomButtonAction("BootLoader Status", Category.HARDWARE) { ctx ->
             QuestBootloaderUnlocker.status(ctx)
         },
-        CustomButtonAction("BL Unlock Prepare V29", Category.HARDWARE) { ctx ->
+        CustomButtonAction("BootLoader Unlock (-V29 Q1+Q2)", Category.HARDWARE) { ctx ->
             QuestBootloaderUnlocker.prepare(ctx)
         },
         CustomButtonAction("Open Android Settings", Category.SETTINGS) { ctx ->
@@ -454,7 +469,7 @@ object Utils {
                 ctx.toast("${cpu.toast} | ${gpu.toast}")
             }
         },
-        CustomButtonAction("CPU Governor Performance", Category.POWER) { ctx ->
+        CustomButtonAction("CPU Governor (Root)", Category.POWER) { ctx ->
             CoroutineScope(Dispatchers.IO).launch {
                 runCatching { CpuUtils.setGovernor("performance") }
                 val (l, b) = runCatching { CpuUtils.getGovernor() }.getOrDefault("?" to "?")
@@ -462,7 +477,7 @@ object Utils {
                 ctx.toast("performance")
             }
         },
-        CustomButtonAction("CPU Governor Schedutil", Category.POWER) { ctx ->
+        CustomButtonAction("CPU Governor (Root)", Category.POWER) { ctx ->
             CoroutineScope(Dispatchers.IO).launch {
                 runCatching { CpuUtils.setGovernor("schedutil") }
                 val (l, b) = runCatching { CpuUtils.getGovernor() }.getOrDefault("?" to "?")
@@ -486,6 +501,22 @@ object Utils {
             val pkg = AppContext.app.packageName
             val perms = listOf(
                 "android.permission.WRITE_SECURE_SETTINGS",
+                "android.permission.INSTALL_PACKAGES",
+                "android.permission.DELETE_PACKAGES",
+                "android.permission.DEVICE_POWER",
+                "android.permission.REBOOT",
+                "android.permission.MOUNT_UNMOUNT_FILESYSTEMS",
+                "android.permission.READ_LOGS",
+                "android.permission.INTERACT_ACROSS_USERS",
+                "android.permission.INTERACT_ACROSS_USERS_FULL",
+                "android.permission.MODIFY_PHONE_STATE",
+                "android.permission.CALL_PRIVILEGED",
+                "android.permission.BIND_APPWIDGET",
+                "android.permission.SET_TIME",
+                "android.permission.SET_TIME_ZONE",
+                "android.permission.CAPTURE_VIDEO_OUTPUT",
+                "android.permission.CAPTURE_AUDIO_OUTPUT",
+                "android.permission.PACKAGE_USAGE_STATS",
                 "android.permission.WRITE_SETTINGS",
                 "android.permission.SYSTEM_ALERT_WINDOW",
                 "android.permission.PACKAGE_USAGE_STATS",
@@ -517,17 +548,15 @@ object Utils {
             ctx.run("appops set $pkg WRITE_SETTINGS allow")
             ctx.run("appops set $pkg GET_USAGE_STATS allow")
             ctx.log("Grant finished ($ok pm grants)")
-            ctx.toast("Granted $ok")
         },
-        CustomButtonAction("Timeout 2 hours", Category.OFFLINE) { ctx ->
+        CustomButtonAction("Timeout Off", Category.OFFLINE) { ctx ->
             if (!LocalDevice.canWriteSettings()) {
                 LocalDevice.requestWriteSettings()
-                ctx.toast("Grant write settings first")
+                ctx.log("Grant write settings first")
                 return@CustomButtonAction
             }
-            val ok = LocalDevice.setScreenTimeoutMs(AppContext.app, 2 * 60 * 60 * 1000)
-            ctx.log(if (ok) "Timeout → 2h" else "Failed")
-            ctx.toast(if (ok) "2 hours" else "Failed")
+            val ok = LocalDevice.setScreenTimeoutMs(AppContext.app, 2147483647)
+            ctx.log(if (ok) "Timeout Off" else "Failed")
         },
 
         CustomButtonAction("Open Developer Settings", Category.OFFLINE) { ctx ->
@@ -544,6 +573,38 @@ object Utils {
                 AppContext.app.startActivity(fallbackIntent)
             }
         },
+        CustomButtonAction("Apply Charge Limit Now", Category.OFFLINE) { ctx ->
+            Prefs.setChargeLimitEnabled(AppContext.app, true)
+            val r = ChargeLimit.applySaved(AppContext.app)
+            ctx.log(ChargeLimit.statusLine() + "\n" + r.detail)
+            ctx.toast(if (r.ok) "Limit ${r.percent}%" else "Need root")
+        },
+        CustomButtonAction("Charge Limit Status", Category.OFFLINE) { ctx ->
+            ctx.log(ChargeLimit.statusLine())
+            ctx.log(ChargeLimit.readCurrentLimit())
+            ctx.toast(ChargeLimit.statusLine())
+        },
+        CustomButtonAction("View Network Stats", Category.OFFLINE) { ctx ->
+            val out = ShellExecutor.run(
+                "ip -s link; echo ---; cat /proc/net/dev 2>/dev/null | head -20",
+                preferRoot = true,
+                adbManager = null
+            )
+            ctx.log(out)
+            ctx.toast("Network stats logged")
+        },
+        CustomButtonAction("Wi-Fi Off", Category.OFFLINE) { ctx ->
+            ShellExecutor.run("svc wifi disable", preferRoot = true, adbManager = null)
+            ctx.toast("Wi-Fi off")
+        },
+        CustomButtonAction("Wi-Fi On", Category.OFFLINE) { ctx ->
+            ShellExecutor.run("svc wifi enable", preferRoot = true, adbManager = null)
+            ctx.toast("Wi-Fi on")
+        },
+        CustomButtonAction("Restart Wi-Fi", Category.OFFLINE) { ctx ->
+            ShellExecutor.run("svc wifi disable; sleep 1; svc wifi enable", preferRoot = true, adbManager = null)
+            ctx.toast("Wi-Fi restarted")
+        },
         CustomButtonAction("Enable Wireless Debug", Category.OFFLINE) { ctx ->
             try {
                 val ok = Settings.Global.putInt(AppContext.app.contentResolver, "adb_wifi_enabled", 1)
@@ -551,10 +612,6 @@ object Utils {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        },
-        CustomButtonAction("Open App Details", Category.OFFLINE) { ctx ->
-            LocalDevice.openAppDetails()
-            ctx.log("Opened Helix app details")
         },
         CustomButtonAction("Open System Settings", Category.OFFLINE) { ctx ->
             GoSettings.goToSettings(ctx)
@@ -727,13 +784,56 @@ object Utils {
                 }
             }
         },
+        CustomButtonAction("LED Breathing (RGB)", Category.HARDWARE) { ctx ->
+            val activity = (AppContext.app as? android.app.Activity)
+                ?: run {
+                    RgbLedEngine.startBreathing(ctx)
+                    ctx.toast("Breathing (saved/custom RGB)")
+                    return@CustomButtonAction
+                }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                RgbPickerDialog.show(
+                    context = activity,
+                    initialR = RgbLedEngine.customRed ?: 255,
+                    initialG = RgbLedEngine.customGreen ?: 0,
+                    initialB = RgbLedEngine.customBlue ?: 0,
+                    title = "Breathing RGB"
+                ) { r, g, b ->
+                    CoroutineScope(Dispatchers.IO).launch {
+                        RgbLedEngine.startBreathing(ctx, r, g, b)
+                        ctx.toast("Breathing R$r G$g B$b")
+                    }
+                }
+            }
+        },
+        CustomButtonAction("LED 2-Color Gradient", Category.HARDWARE) { ctx ->
+            val activity = (AppContext.app as? android.app.Activity)
+                ?: run {
+                    RgbLedEngine.startGradient(ctx)
+                    ctx.toast("Gradient (saved endpoints)")
+                    return@CustomButtonAction
+                }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                RgbPickerDialog.showGradient(activity) { r1, g1, b1, r2, g2, b2 ->
+                    CoroutineScope(Dispatchers.IO).launch {
+                        RgbLedEngine.startGradient(ctx, r1, g1, b1, r2, g2, b2)
+                        ctx.toast("Gradient A($r1,$g1,$b1) ↔ B($r2,$g2,$b2)")
+                    }
+                }
+            }
+        },
         CustomButtonAction(
-            "Enable Teleporting", Category.MISC
+            "Enable Teleporting (Root)", Category.MISC
         ) { ctx ->
             RootHelper.runRoot(ctx, "oculuspreferences --setc shell_teleport_anywhere true")
         },
         CustomButtonAction(
-            "Hand Tracking All Games", Category.MISC
+            "Enable Debug Boot (Root)", Category.MISC
+        ) { ctx ->
+            RootHelper.runRoot(ctx, "oculuspreferences --setc debug_enable_boot_configuration_overrides true")
+        },
+        CustomButtonAction(
+            "Hand Tracking All Games (Root)", Category.MISC
         ) { ctx ->
             RootHelper.runRoot(
                 ctx,
@@ -742,7 +842,7 @@ object Utils {
             RootHelper.runRoot(ctx, "am force-stop com.oculus.vrshell")
         },
         CustomButtonAction(
-            "Disable Updates Root", Category.SETTINGS
+            "Disable Updates (Root)", Category.SETTINGS
         ) { ctx ->
             RootHelper.runRoot(
                 ctx, "am force-stop com.oculus.updater; " +
@@ -754,7 +854,7 @@ object Utils {
                         """sed -i '/name="com\\.oculus\\.updater"/{s/enabled="1"/enabled="2"/;s/enabled="3"/enabled="2"/;/enabled="[23]"/!s/first-install-time/enabled="2" first-install-time/}' /data/system/users/0/package-restrictions.xml.reservecopy"""
             )
         },
-        CustomButtonAction("Make System App (root)", Category.HARDWARE) { ctx ->
+        CustomButtonAction("Make System App (Root)", Category.HARDWARE) { ctx ->
             if (!RootHelper.hasRoot(ctx)) {
                 ctx.log("Root required")
                 ctx.toast("Root required")
@@ -838,10 +938,10 @@ object Utils {
                     .show()
             }
         },
-        CustomButtonAction("Change Boot Animation", Category.MISC) { ctx ->
+        CustomButtonAction("Change Boot Animation (Root)", Category.MISC) { ctx ->
             MainActivity.Instance?.changeBootAnim(ctx)
         },
-        CustomButtonAction("Launch Dogfood Hub", Category.HARDWARE) { ctx ->
+        CustomButtonAction("Launch Dogfood Hub (Root)", Category.HARDWARE) { ctx ->
             ctx.run("setprop debug.oculus.experimentalEnabled 1")
             RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_vision.oculus_gk_is_qa true")
             RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_os_services.oculus_is_trusted_user true")
@@ -863,12 +963,12 @@ object Utils {
             ctx.log("Launched Dogfood Hub")
         },
         CustomButtonAction(
-            "Enable/Disable OVR Metric Headlock", Category.VISUALS
+            "OVR Metric Headlock", Category.VISUALS
         ) { ctx ->
             OVRHeadLock = !OVRHeadLock
             Overlay.setHeadlocked(ctx, OVRHeadLock)
         },
-        CustomButtonAction("Launch Gauntlet", Category.HARDWARE) { ctx ->
+        CustomButtonAction("Launch Gauntlet (Root)", Category.HARDWARE) { ctx ->
             ctx.run("setprop debug.oculus.experimentalEnabled 1")
             RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_vision.oculus_gk_is_qa true")
             RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_os_services.oculus_is_trusted_user true")
@@ -887,7 +987,7 @@ object Utils {
             RootHelper.runRoot(ctx, "am start com.oculus.vrshell/com.oculus.panelapp.gauntlettest.GauntletTestPanelActivity")
             ctx.log("Launched Gauntlet")
         },
-        CustomButtonAction("Launch Debug Panel", Category.HARDWARE) { ctx ->
+        CustomButtonAction("Launch Debug Panel (Root)", Category.HARDWARE) { ctx ->
             ctx.run("setprop debug.oculus.experimentalEnabled 1")
             RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_vision.oculus_gk_is_qa true")
             RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_os_services.oculus_is_trusted_user true")
@@ -906,28 +1006,173 @@ object Utils {
             RootHelper.runRoot(ctx, "am start com.oculus.vrshell/com.oculus.panelapp.debug.ShellDebugActivity")
             ctx.log("Launched Debug")
         },
-        CustomButtonAction("Launch Toast", Category.HARDWARE) { ctx ->
-            ctx.run("setprop debug.oculus.experimentalEnabled 1")
-            RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_vision.oculus_gk_is_qa true")
-            RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_os_services.oculus_is_trusted_user true")
-            RootHelper.runRoot(ctx, "setprop persist.device_config.oculus_shared_vision.oculus_gk_is_employee 1")
-            val buildType = ctx.run("getprop ro.build.type").trim()
-            if (buildType != "userdebug") {
-                ctx.log("Toast is not enabled (build type is $buildType)")
-                ctx.toast("Enable Toast first")
-                return@CustomButtonAction
+        CustomButtonAction("Fan Status", Category.POWER) { ctx ->
+            CoroutineScope(Dispatchers.IO).launch {
+                val info = FanUtils.getFanInfo()
+                if (info.available) {
+                    ctx.log("Fan ${info.type}: ${info.curState}/${info.maxState}  (${info.path})")
+                    ctx.toast("${info.curState}/${info.maxState}")
+                } else {
+                    ctx.log("No fan cooling device found")
+                    ctx.toast("No fan node")
+                }
             }
-            ctx.log("Enabling Toast (step 1)…")
-            RootHelper.runRoot(ctx, "resetprop ro.build.type userdebug; stop; start")
-
-            ctx.toast("Device UI will restart – reopen the app after")
-            RootHelper.runRoot(ctx, "am broadcast -a oculus.intent.action.DC_OVERRIDE --esa config_param_value oculus_systemshell:oculus_is_trusted_user:true; stop; start")
-            RootHelper.runRoot(ctx, "am start com.oculus.vrshell/com.oculus.panelapp.toasts.ToastsActivity")
-            ctx.log("Launched Toast")
+        },
+        CustomButtonAction("Root Detection Scan", Category.HARDWARE) { ctx ->
+            CoroutineScope(Dispatchers.IO).launch {
+                val report = RootDetect.run(ctx)
+                ctx.log(RootDetect.format(report))
+                ctx.toast(report.summary)
+            }
+        },
+        CustomButtonAction("Frida Status", Category.HARDWARE) { ctx ->
+            CoroutineScope(Dispatchers.IO).launch {
+                ctx.log(FridaServer.status(ctx))
+                ctx.toast(if (FridaServer.isRunning(ctx)) "Frida running" else "Frida stopped")
+            }
+        },
+        CustomButtonAction("Install Frida Server", Category.HARDWARE) { ctx ->
+            CoroutineScope(Dispatchers.IO).launch {
+                if (!RootHelper.hasRoot(ctx)) {
+                    ctx.log("Root required"); ctx.toast("Root required"); return@launch
+                }
+                val ok = FridaServer.ensureBinary(ctx)
+                ctx.toast(if (ok) "frida-server ready" else "Install failed — see log")
+            }
+        },
+        CustomButtonAction("Voice Preset: Deep", Category.AUDIO) { ctx ->
+            VoiceChanger.applyPreset("Deep")
+            ctx.log(VoiceChanger.statusLine())
+            ctx.toast("Preset Deep")
+        },
+        CustomButtonAction("Voice Preset: Chipmunk", Category.AUDIO) { ctx ->
+            VoiceChanger.applyPreset("Chipmunk")
+            ctx.log(VoiceChanger.statusLine())
+            ctx.toast("Preset Chipmunk")
+        },
+        CustomButtonAction("Voice Preset: Robot", Category.AUDIO) { ctx ->
+            VoiceChanger.applyPreset("Robot")
+            ctx.log(VoiceChanger.statusLine())
+            ctx.toast("Preset Robot")
+        },
+        CustomButtonAction("Voice Preset: Alien", Category.AUDIO) { ctx ->
+            VoiceChanger.applyPreset("Alien")
+            ctx.log(VoiceChanger.statusLine())
+            ctx.toast("Preset Alien")
+        },
+        CustomButtonAction("Voice Preset: Monster", Category.AUDIO) { ctx ->
+            VoiceChanger.applyPreset("Monster")
+            ctx.log(VoiceChanger.statusLine())
+            ctx.toast("Preset Monster")
+        },
+        CustomButtonAction("Voice Status", Category.AUDIO) { ctx ->
+            ctx.log(VoiceChanger.statusLine())
+            ctx.toast(if (VoiceChanger.enabled) "VC ON" else "VC OFF")
+        },
+        CustomButtonAction("List Soundboard", Category.AUDIO) { ctx ->
+            ctx.log(SoundBoard.listSummary())
+            ctx.toast("${SoundBoard.loadAll().size} clips")
+        },
+        CustomButtonAction("Stop Soundboard", Category.AUDIO) { ctx ->
+            SoundBoard.stopPlayback()
+            ctx.toast("Stopped")
+        },
+        CustomButtonAction("Network Guard Status", Category.OFFLINE) { ctx ->
+            ctx.log(NetworkGuard.status())
+            ctx.toast(if (NetworkGuard.firewallOn) "Guard ON" else "Guard OFF")
+        },
+        CustomButtonAction("Clear Killswitch Token", Category.OFFLINE) { ctx ->
+            val r = NonRootCompat.clearKillswitchToken(ctx)
+            ctx.log("[${r.method}] ${r.detail}")
+            ctx.toast(
+                when {
+                    r.ok && r.method == "none" -> "No token"
+                    r.ok -> "Token cleared"
+                    else -> "Needs root/ADB for /persist"
+                }
+            )
+        },
+        CustomButtonAction("Safe Boot", Category.SETTINGS) { ctx ->
+            SafeBoot.applyNow(ctx)
+        },
+        CustomButtonAction("Cycle Theme", Category.MISC) { ctx ->
+            val t = ThemeManager.cycle()
+            ctx.log("Theme → ${t.label}")
+            ctx.toast(t.label)
+        },
+        CustomButtonAction("Theme: Cyan", Category.MISC) { ctx ->
+            ThemeManager.setTheme(AppContext.app, "cyan")
+            ctx.toast("Cyan")
+        },
+        CustomButtonAction("Theme: Emerald", Category.MISC) { ctx ->
+            ThemeManager.setTheme(AppContext.app, "emerald")
+            ctx.toast("Emerald")
+        },
+        CustomButtonAction("Theme: High contrast", Category.MISC) { ctx ->
+            ThemeManager.setTheme(AppContext.app, "high_contrast")
+            ctx.toast("High contrast")
+        },
+        CustomButtonAction("Theme: DNA Green", Category.MISC) { ctx ->
+            ThemeManager.setTheme(AppContext.app, "dna_green")
+            ctx.toast("DNA Green")
+        },
+        CustomButtonAction("Theme: DNA Red", Category.MISC) { ctx ->
+            ThemeManager.setTheme(AppContext.app, "dna_red")
+            ctx.toast("DNA Red")
+        },
+        CustomButtonAction("Theme: DNA Blue", Category.MISC) { ctx ->
+            ThemeManager.setTheme(AppContext.app, "dna_blue")
+            ctx.toast("DNA Blue")
+        },
+        CustomButtonAction("Theme: DNA Purple", Category.MISC) { ctx ->
+            ThemeManager.setTheme(AppContext.app, "dna_purple")
+            ctx.toast("DNA Purple")
         },
     )
 
     val CustomToggles = listOf(
+        CustomToggleAction(
+            "Charge Limit (root)", Category.OFFLINE,
+            onEnabled = { ctx ->
+                Prefs.setChargeLimitEnabled(AppContext.app, true)
+                val r = ChargeLimit.applySaved(AppContext.app)
+                ctx.log(r.detail)
+                ctx.toast(if (r.ok) "Limit ${r.percent}% ON" else "Saved — needs root")
+            },
+            onDisabled = { ctx ->
+                Prefs.setChargeLimitEnabled(AppContext.app, false)
+                val r = ChargeLimit.apply(100)
+                ctx.log(r.detail)
+                ctx.toast("Charge limit OFF")
+            }
+        ),
+        Utils.CustomToggleAction(
+            "Wireless Debug On Start", Category.OFFLINE,
+            onEnabled = { ctx ->
+                Prefs.setWirelessDebugOnStart(AppContext.app, true)
+                ctx.toast("Wireless debug on start: ON")
+            },
+            onDisabled = { ctx ->
+                Prefs.setWirelessDebugOnStart(AppContext.app, false)
+                ctx.toast("Wireless debug on start: OFF")
+            }
+        ),
+        CustomToggleAction(
+            "Disable Wi-Fi On Boot", Category.OFFLINE,
+            onEnabled = { ctx ->
+                Prefs.setDisableWifiOnBoot(AppContext.app, true)
+                ctx.toast("Disable Wi-Fi on boot: ON")
+            },
+            onDisabled = { ctx ->
+                Prefs.setDisableWifiOnBoot(AppContext.app, false)
+                ctx.toast("Disable Wi-Fi on boot: OFF")
+            }
+        ),
+        CustomToggleAction(
+            "Voice Changer (legacy misc)", Utils.Category.MISC,
+            onEnabled = { ctx -> VoiceChanger.start(ctx) },
+            onDisabled = { ctx -> VoiceChanger.stop(ctx) }
+        ),
         CustomToggleAction(
             "OTA Blocker (root)", Category.SETTINGS,
             onEnabled = { ctx ->
@@ -954,7 +1199,7 @@ object Utils {
             }
         ),
         CustomToggleAction(
-            "Spoof Build Type (userdebug)", Category.SETTINGS,
+            "Build Type userdebug (Root)", Category.SETTINGS,
             onEnabled = { ctx ->
                 if (!RootHelper.hasRoot(ctx)) {
                     ctx.log("Root recommended for durable spoof; trying setprop anyway")
@@ -983,7 +1228,7 @@ object Utils {
             }
         ),
         CustomToggleAction(
-            "Hosts Blocker (root)", Category.SETTINGS,
+            "Hosts Blocker (Root)", Category.SETTINGS,
             onEnabled = { ctx ->
                 if (!RootHelper.hasRoot(ctx)) {
                     ctx.toast("Root required"); return@CustomToggleAction
@@ -995,20 +1240,20 @@ object Utils {
                 127.0.0.1 graph.facebook.com
                 127.0.0.1 portal.fb.com
             """.trimIndent()
-                RootHelper.runRoot(ctx, "mkdir -p /data/adb/modules/singularity-hosts/system/etc 2>/dev/null")
+                RootHelper.runRoot(ctx, "mkdir -p /data/adb/modules/hosts/system/etc 2>/dev/null")
                 RootHelper.writeScript(ctx, "hosts", hosts)
-                RootHelper.runRoot(ctx, "cp /data/local/tmp/hosts /data/adb/modules/singularity-hosts/system/etc/hosts")
-                RootHelper.runRoot(ctx, "touch /data/adb/modules/singularity-hosts/auto_mount")
+                RootHelper.runRoot(ctx, "cp /data/local/tmp/hosts /data/adb/modules/hosts/system/etc/hosts")
+                RootHelper.runRoot(ctx, "touch /data/adb/modules/hosts/auto_mount")
                 ctx.log("Hosts module written – reboot or remount for full effect")
                 ctx.toast("Hosts written (reboot recommended)")
             },
             onDisabled = { ctx ->
-                RootHelper.runRoot(ctx, "rm -rf /data/adb/modules/singularity-hosts 2>/dev/null || true")
+                RootHelper.runRoot(ctx, "rm -rf /data/adb/modules/hosts 2>/dev/null || true")
                 ctx.log("Hosts module removed")
             }
         ),
         CustomToggleAction(
-            "RGB LED (root)", Category.HARDWARE,
+            "RGB LED (Root)", Category.HARDWARE,
             onEnabled = { ctx ->
                 RgbLedEngine.run(ctx)
             },
@@ -1017,7 +1262,7 @@ object Utils {
             }
         ),
         CustomToggleAction(
-            "Battery Gradient LED", Category.HARDWARE,
+            "Battery Gradient LED (Root)", Category.HARDWARE,
             onEnabled = { ctx ->
                 RgbLedEngine.startBatteryLed(ctx)
             },
@@ -1088,7 +1333,7 @@ object Utils {
             onDisabled = { ctx -> MiniMenu.stop(ctx) }
         ),
         CustomToggleAction(
-            "Stay On While Charging (local)", Category.OFFLINE,
+            "Stay On While Charging", Category.OFFLINE,
             onEnabled = { ctx ->
                 if (!LocalDevice.canWriteSettings()) {
                     LocalDevice.requestWriteSettings()
@@ -1146,16 +1391,134 @@ object Utils {
                 ctx.toast("Macros on boot OFF")
             }
         ),
-
-        )
+        CustomToggleAction(
+            "Fan Override (Root)", Category.POWER,
+            onEnabled = { ctx ->
+                if (!RootHelper.hasRoot(ctx)) {
+                    ctx.log("Root required for fan control")
+                    ctx.toast("Root required")
+                    return@CustomToggleAction
+                }
+                CoroutineScope(Dispatchers.IO).launch {
+                    val info = FanUtils.discoverFan()
+                    if (!info.available) {
+                        ctx.log("No writable fan cooling device found")
+                        ctx.toast("No fan node")
+                        return@launch
+                    }
+                    ctx.log("Fan: ${info.type}  max=${info.maxState}  path=${info.path}")
+                    FanUtils.startOverride(ctx, FanUtils.preferredSpeed.coerceIn(0, info.maxState))
+                    ctx.toast("Fan override ON")
+                }
+            },
+            onDisabled = { ctx ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    FanUtils.stopOverride(ctx)
+                    ctx.toast("Fan override OFF")
+                }
+            }
+        ),
+        CustomToggleAction(
+            "Tweak Service (Fan FG)", Category.POWER,
+            onEnabled = { ctx ->
+                TweakService.start(
+                    AppContext.app,
+                    fan = true,
+                    fanSpeed = FanUtils.preferredSpeed
+                )
+                ctx.log("TweakService started (foreground fan maintain)")
+                ctx.toast("Tweak service ON")
+            },
+            onDisabled = { ctx ->
+                TweakService.stop(AppContext.app)
+                ctx.log("TweakService stopped")
+                ctx.toast("Tweak service OFF")
+            }
+        ),
+        CustomToggleAction(
+            "Frida Server (Root)", Category.HARDWARE,
+            onEnabled = { ctx ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    if (!RootHelper.hasRoot(ctx)) {
+                        ctx.log("Root required"); ctx.toast("Root required"); return@launch
+                    }
+                    if (!FridaServer.ensureBinary(ctx)) {
+                        ctx.toast("No frida-server binary"); return@launch
+                    }
+                    FridaServer.start(ctx)
+                }
+            },
+            onDisabled = { ctx ->
+                FridaServer.stop(ctx)
+            }
+        ),
+        CustomToggleAction(
+            "DNS Domain Blocker (VPN)", Category.OFFLINE,
+            onEnabled = { ctx ->
+                val prep = DnsBlockerService.prepareIntent(AppContext.app)
+                if (prep != null) {
+                    prep.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    try {
+                        AppContext.app.startActivity(prep)
+                        ctx.log("Approve VPN permission, then toggle again")
+                        ctx.toast("Grant VPN permission")
+                    } catch (e: Exception) {
+                        ctx.log("VPN prepare failed: ${e.message}")
+                    }
+                    return@CustomToggleAction
+                }
+                DnsBlockerService.start(AppContext.app)
+                ctx.log("DNS blocker VPN started (blocks graph/telemetry domains)")
+                ctx.toast("DNS blocker ON")
+            },
+            onDisabled = { ctx ->
+                DnsBlockerService.stop(AppContext.app)
+                ctx.log("DNS blocker stopped")
+                ctx.toast("DNS blocker OFF")
+            }
+        ),
+        CustomToggleAction(
+            "Mute Microphone", Category.AUDIO,
+            onEnabled = { ctx -> MicControl.mute(ctx, true) },
+            onDisabled = { ctx -> MicControl.mute(ctx, false) }
+        ),
+        CustomToggleAction(
+            "Voice Changer", Category.AUDIO,
+            onEnabled = { ctx -> VoiceChanger.start(ctx) },
+            onDisabled = { ctx -> VoiceChanger.stop(ctx) }
+        ),
+        CustomToggleAction(
+            "Network Guard (Firewall+DNS)", Category.OFFLINE,
+            onEnabled = { ctx -> NetworkGuard.enableFirewall(ctx) },
+            onDisabled = { ctx -> NetworkGuard.disableFirewall(ctx) }
+        ),
+        CustomToggleAction(
+            "HTTP Intercept (cleartext)", Category.OFFLINE,
+            onEnabled = { ctx -> NetworkGuard.enableIntercept(ctx) },
+            onDisabled = { ctx -> NetworkGuard.disableIntercept(ctx) }
+        ),
+        CustomToggleAction(
+            "Safe Boot", Category.SETTINGS,
+            onEnabled = { ctx ->
+                SafeBoot.setEnabled(AppContext.app, true)
+                ctx.log(SafeBoot.summary())
+                ctx.toast("SafeBoot armed — applies on boot")
+            },
+            onDisabled = { ctx ->
+                SafeBoot.setEnabled(AppContext.app, false)
+                ctx.log("SafeBoot disarmed")
+                ctx.toast("SafeBoot off")
+            }
+        ),
+    )
 
     val Sliders = listOf(
         SliderAction("Root Attempts", 1, 10, 5, "setprop debug.ionstack.attempts %VALUE%", Category.HARDWARE),
         SliderAction("Screen Timeout", 0, 1000, 10, "settings put system screen_off_timeout %VALUE%", Category.SETTINGS),
         SliderAction("Screen Brightness", 1, 255, 100, "settings put system screen_brightness %VALUE%", Category.SETTINGS),
         SliderAction("FPS", 60, 120, 90, "setprop debug.oculus.refreshRate %VALUE%", Category.HARDWARE),
-        SliderAction("GPU Level", 0, 7, 2, "setprop debug.oculus.gpuLevel %VALUE%", Category.HARDWARE),
-        SliderAction("CPU Level", 0, 7, 2, "setprop debug.oculus.cpuLevel %VALUE%", Category.HARDWARE),
+        SliderAction("GPU Level", 0, 7, 2, "setprop debug.oculus.gpuLevel %VALUE%", Category.POWER),
+        SliderAction("CPU Level", 0, 7, 2, "setprop debug.oculus.cpuLevel %VALUE%", Category.POWER),
         SliderAction("Prediction Level", 0, 15, 0, "setprop debug.oculus.predictionSeconds %VALUE%", Category.SETTINGS),
         SliderAction(
             "Texture Amount", 300, 4096, 2048,
@@ -1200,6 +1563,19 @@ object Utils {
                 val ok = LocalDevice.setBrightness(AppContext.app, level)
                 ctx.log(if (ok) "Brightness → $percent% (level $level)" else "Failed")
                 if (ok) ctx.toast("$percent%")
+            }
+        },
+        CustomSliderAction(
+            "Charge limit percent", 50, 100, 80, Category.OFFLINE
+        ) { ctx, value ->
+            val pct = value.toInt().coerceIn(50, 100)
+            Prefs.setChargeLimitPercent(AppContext.app, pct)
+            if (Prefs.chargeLimitEnabled(AppContext.app)) {
+                val r = ChargeLimit.apply(pct)
+                ctx.log("Charge limit -> $pct% (${r.method}) ${r.detail}")
+                ctx.toast(if (r.ok) "Limit $pct%" else "Saved $pct% (need root)")
+            } else {
+                ctx.toast("Saved $pct% — enable Charge Limit toggle")
             }
         },
         CustomSliderAction(
@@ -1263,7 +1639,7 @@ object Utils {
             ctx.log("LED R=$r G=$g B=$b")
         },
         CustomSliderAction(
-            label = "CPU Max Temp °C",
+            label = "CPU Max Temp (Root) °C",
             min = 60, max = 100, initial = 85,
             category = Category.POWER
         ) { ctx, value ->
@@ -1272,7 +1648,7 @@ object Utils {
             ctx.log("CPU max temp threshold → ${v}°C")
         },
         CustomSliderAction(
-            label = "CPU High Usage %",
+            label = "CPU High Usage (Root) %",
             min = 50, max = 100, initial = 90,
             category = Category.POWER
         ) { ctx, value ->
@@ -1281,7 +1657,7 @@ object Utils {
             ctx.log("CPU high usage threshold → ${v}%")
         },
         CustomSliderAction(
-            label = "GPU Max Temp °C",
+            label = "GPU Max Temp (Root) °C",
             min = 60, max = 100, initial = 80,
             category = Category.POWER
         ) { ctx, value ->
@@ -1290,7 +1666,7 @@ object Utils {
             ctx.log("GPU max temp threshold → ${v}°C")
         },
         CustomSliderAction(
-            label = "GPU High Usage %",
+            label = "GPU High Usage (Root) %",
             min = 50, max = 100, initial = 95,
             category = Category.POWER
         ) { ctx, value ->
@@ -1299,7 +1675,7 @@ object Utils {
             ctx.log("GPU high usage threshold → ${v}%")
         },
         CustomSliderAction(
-            label = "GPU Max Freq MHz",
+            label = "GPU Max Freq (Root)",
             min = 200, max = 600, initial = 492,
             category = Category.POWER,
             step = 10f
@@ -1311,7 +1687,7 @@ object Utils {
             }
         },
         CustomSliderAction(
-            label = "GPU Min Freq MHz",
+            label = "GPU Min Freq (Root)",
             min = 100, max = 400, initial = 285,
             category = Category.POWER,
             step = 5f
@@ -1321,6 +1697,74 @@ object Utils {
                 val ok = runCatching { GpuUtils.setGpuMinFreqMhz(mhz) }.getOrDefault(false)
                 ctx.log(if (ok) "GPU min → ${mhz} MHz" else "Need root to set GPU min")
             }
+        },
+        CustomSliderAction(
+            label = "Fan Speed (Root)",
+            min = 0,
+            max = 255,
+            initial = 255,
+            category = Category.POWER,
+            step = 5f
+        ) { ctx, value ->
+            val speed = value.toInt().coerceIn(0, 255)
+            FanUtils.preferredSpeed = speed
+            CoroutineScope(Dispatchers.IO).launch {
+                val ok = FanUtils.setFanState(speed)
+                if (ok) {
+                    if (RootHelper.runAsRootLocal("pgrep -f ${FanUtils.SCRIPT_NAME}").isNotBlank()) {
+                        FanUtils.startOverride(ctx, speed)
+                    }
+                    ctx.log("Fan speed → $speed")
+                } else {
+                    ctx.log("Failed to set fan (need root + valid cooling_device)")
+                }
+            }
+        },
+        CustomSliderAction(
+            label = "Voice Pitch x100",
+            min = 40, max = 200, initial = 100,
+            category = Category.AUDIO
+        ) { ctx, value ->
+            VoiceChanger.pitchFactor = (value.toInt().coerceIn(40, 200) / 100f)
+            VoiceChanger.activePreset = "Custom"
+            ctx.log(VoiceChanger.statusLine())
+        },
+        CustomSliderAction(
+            label = "Voice Robot %",
+            min = 0, max = 100, initial = 0,
+            category = Category.AUDIO
+        ) { ctx, value ->
+            VoiceChanger.robotAmount = value.toInt().coerceIn(0, 100) / 100f
+            VoiceChanger.activePreset = "Custom"
+            ctx.log(VoiceChanger.statusLine())
+        },
+        CustomSliderAction(
+            label = "Voice Alien %",
+            min = 0, max = 100, initial = 0,
+            category = Category.AUDIO
+        ) { ctx, value ->
+            VoiceChanger.alienAmount = value.toInt().coerceIn(0, 100) / 100f
+            VoiceChanger.activePreset = "Custom"
+            ctx.log(VoiceChanger.statusLine())
+        },
+        CustomSliderAction(
+            label = "Voice Gain x100",
+            min = 20, max = 300, initial = 120,
+            category = Category.AUDIO
+        ) { ctx, value ->
+            VoiceChanger.gain = value.toInt().coerceIn(20, 300) / 100f
+            VoiceChanger.activePreset = "Custom"
+            ctx.log(VoiceChanger.statusLine())
+        },
+        CustomSliderAction(
+            label = "Voice Echo samples",
+            min = 0, max = 8000, initial = 0,
+            category = Category.AUDIO,
+            step = 200f
+        ) { ctx, value ->
+            VoiceChanger.echoSamples = value.toInt().coerceIn(0, 8000)
+            VoiceChanger.activePreset = "Custom"
+            ctx.log(VoiceChanger.statusLine())
         },
     )
 

@@ -35,27 +35,26 @@ class PresetsController(
     lateinit var categoryContent: LinearLayout
     lateinit var macrosListContainer: LinearLayout
     private var statusStrip: TextView? = null
-
-    /** Current section body that new controls are added into (null = top level). */
+    private var cpuCircle: CircularUsageView? = null
+    private var gpuCircle: CircularUsageView? = null
     private var currentSectionBody: LinearLayout? = null
-
-    /** Remember expand/collapse per section title across re-renders of the same category. */
     private val sectionExpanded = mutableMapOf<String, Boolean>()
 
     val categories = Utils.Category.entries.toTypedArray()
     var currentCategory: Utils.Category = categories.first()
 
     private fun c(resId: Int) = ContextCompat.getColor(context, resId)
-    private val colorAccent by lazy { runCatching { c(R.color.accent) }.getOrDefault(0xFFB98CFF.toInt()) }
-    private val colorOnAccent by lazy { runCatching { c(R.color.on_accent) }.getOrDefault(Color.BLACK) }
-    private val colorTextPrimary by lazy { runCatching { c(R.color.text_primary) }.getOrDefault(Color.WHITE) }
-    private val colorTextSecondary by lazy { runCatching { c(R.color.text_secondary) }.getOrDefault(0xFFAAAAAA.toInt()) }
+    private val theme get() = ThemeManager.current(context)
+    private val colorAccent get() = theme.accent
+    private val colorOnAccent get() = theme.onAccent
+    private val colorTextPrimary get() = theme.textPrimary
+    private val colorTextSecondary get() = theme.textSecondary
     private val colorTextMuted by lazy { runCatching { c(R.color.text_muted) }.getOrDefault(0xFF6A6A70.toInt()) }
     private val colorStatusError by lazy { runCatching { c(R.color.status_error) }.getOrDefault(0xFFFF6B6B.toInt()) }
-    private val colorSurface by lazy { runCatching { c(R.color.surface) }.getOrDefault(0xFF121218.toInt()) }
-    private val colorCard by lazy { 0xFF12101A.toInt() }
-    private val colorStroke by lazy { 0x40B98CFF }
-    private val colorAccentSecondary by lazy { runCatching { c(R.color.accent_secondary) }.getOrDefault(0xFFD946EF.toInt()) }
+    private val colorSurface get() = theme.surface
+    private val colorCard get() = theme.card
+    private val colorStroke get() = theme.stroke
+    private val colorAccentSecondary get() = theme.accentSecondary
 
     fun build() {
         container.removeAllViews()
@@ -74,6 +73,7 @@ class PresetsController(
             bottomMargin = px(10)
         })
         startStatusTicker()
+        startUsageTicker()
 
         categoryTabs = TabLayout(context).apply {
             tabMode = TabLayout.MODE_SCROLLABLE
@@ -134,6 +134,75 @@ class PresetsController(
         }
     }
 
+    /** CPU (blue) + GPU (green) rings — only shown at the top of the Power tab. */
+    private fun addPowerUsageCircles() {
+        val circlesRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(px(8), px(12), px(8), px(12))
+            background = rounded(colorCard, 16f, colorStroke, 1f)
+        }
+        val prevCpu = cpuCircle?.progress ?: 0f
+        val prevGpu = gpuCircle?.progress ?: 0f
+        cpuCircle = CircularUsageView(context).apply {
+            label = "CPU"
+            ringColor = 0xFF4FC3F7.toInt()
+            trackColor = 0x334FC3F7
+            strokeWidthDp = 11f
+            progress = prevCpu
+        }
+        gpuCircle = CircularUsageView(context).apply {
+            label = "GPU"
+            ringColor = 0xFF69F0AE.toInt()
+            trackColor = 0x3369F0AE
+            strokeWidthDp = 11f
+            progress = prevGpu
+        }
+        val circleSize = px(96)
+        val circleLp = LinearLayout.LayoutParams(circleSize, circleSize).apply {
+            marginStart = px(16)
+            marginEnd = px(16)
+        }
+        circlesRow.addView(cpuCircle, circleLp)
+        circlesRow.addView(gpuCircle, circleLp)
+        currentSectionBody = null
+        categoryContent.addView(circlesRow, 0, matchWidthParams().apply {
+            bottomMargin = px(10)
+        })
+    }
+
+    private fun startUsageTicker() {
+        scope.launch(Dispatchers.IO) {
+            while (true) {
+                try {
+                    val cpuSnap = LocalPower.cpuSnapshot()
+                    val gpuSnap = LocalPower.gpuSnapshot()
+                    val cpuPct = extractUsagePercent(cpuSnap.log, cpuSnap.toast)
+                    val gpuPct = extractUsagePercent(gpuSnap.log, gpuSnap.toast)
+                    val rootCpu = runCatching { CpuUtils.getCpuMonitorInfo().allCoreUsagePercent }.getOrNull()
+                    val rootGpu = runCatching { GpuUtils.getGpuMonitorInfo().usagePercent }.getOrNull()
+                    val finalCpu = (rootCpu ?: cpuPct)?.toFloat() ?: 0f
+                    val finalGpu = (rootGpu ?: gpuPct)?.toFloat() ?: 0f
+                    scope.launch(Dispatchers.Main) {
+                        cpuCircle?.progress = finalCpu
+                        gpuCircle?.progress = finalGpu
+                    }
+                } catch (_: Throwable) {
+                }
+                delay(2000)
+            }
+        }
+    }
+
+    private fun extractUsagePercent(vararg texts: String): Int? {
+        for (t in texts) {
+            val m = Regex("""(\d+)\s*%""").find(t) ?: continue
+            val v = m.groupValues[1].toIntOrNull() ?: continue
+            if (v in 0..100) return v
+        }
+        return null
+    }
+
     fun displayName(category: Utils.Category): String = when (category) {
         Utils.Category.MODS -> "Mods"
         Utils.Category.VISUALS -> "Visuals"
@@ -141,8 +210,9 @@ class PresetsController(
         Utils.Category.SETTINGS -> "Settings"
         Utils.Category.RECORDING -> "Recording"
         Utils.Category.MISC -> "Misc"
-        Utils.Category.OFFLINE -> "Offline"
+        Utils.Category.OFFLINE -> "Network"
         Utils.Category.POWER -> "Power"
+        Utils.Category.AUDIO -> "Audio"
     }
 
     fun renderCategory(category: Utils.Category) {
@@ -163,6 +233,13 @@ class PresetsController(
             Utils.Category.VISUALS -> renderVisualsGrouped(buttons, toggles, customButtons, customToggles, sliders)
             Utils.Category.SETTINGS -> renderSettingsGrouped(buttons, toggles, customButtons, customToggles, sliders)
             Utils.Category.OFFLINE -> renderOfflineGrouped(buttons, toggles, customButtons, customToggles, sliders)
+            Utils.Category.POWER -> {
+                addPowerUsageCircles()
+                renderDefaultGrouped(buttons, toggles, customButtons, customToggles, sliders, false)
+            }
+            Utils.Category.AUDIO -> {
+                renderAudioGrouped(buttons, toggles, customButtons, customToggles, sliders)
+            }
             else -> renderDefaultGrouped(buttons, toggles, customButtons, customToggles, sliders, isMisc)
         }
 
@@ -171,10 +248,8 @@ class PresetsController(
             customSliders.forEach { addCustomSlider(it) }
         }
 
-        Anim.staggerIn(categoryContent)
+        Anim.staggerIn(categoryContent, perViewDelay = 30L, duration = 260L, fromY = 28f, deep = true)
     }
-
-    // ─── Shared empty / macros helpers ─────────────────────────────────────
 
     private fun maybeEmpty(
         buttons: List<Utils.ButtonAction>,
@@ -205,7 +280,6 @@ class PresetsController(
         refreshMacroList()
     }
 
-    /** Match label against any keyword (case-insensitive). */
     private fun labelMatches(label: String, vararg keys: String): Boolean {
         val l = label.lowercase()
         return keys.any { l.contains(it.lowercase()) }
@@ -221,7 +295,6 @@ class PresetsController(
         addHint("Hold RT / LT / grips as labeled. ADB must be connected. Face buttons need OpenXR on many builds.")
 
         data class Bucket(val title: String, val pred: (String) -> Boolean)
-        // Order matters: first matching bucket wins
         val buckets = listOf(
             Bucket("Fly") { labelMatches(it, "joystick fly", "a-button fly", "velocity fly", "hover fly", "hover", "glide", "rocket", "orbit", "surf", "fly speed", "fly accel", "fly smooth") },
             Bucket("Arms & body") { labelMatches(it, "long arms", "break hands", "tiny", "giant", "taller", "shorter", "side shift", "ipd", "scale", "arm") },
@@ -303,8 +376,6 @@ class PresetsController(
         maybeEmpty(buttons, toggles, customButtons, customToggles, sliders)
     }
 
-    // ─── HARDWARE ──────────────────────────────────────────────────────────
-
     private fun renderHardwareGrouped(
         buttons: List<Utils.ButtonAction>,
         toggles: List<Utils.ToggleAction>,
@@ -364,8 +435,6 @@ class PresetsController(
         maybeEmpty(buttons, toggles, customButtons, customToggles, sliders)
     }
 
-    // ─── VISUALS ───────────────────────────────────────────────────────────
-
     private fun renderVisualsGrouped(
         buttons: List<Utils.ButtonAction>,
         toggles: List<Utils.ToggleAction>,
@@ -411,8 +480,6 @@ class PresetsController(
         }
         maybeEmpty(buttons, toggles, customButtons, customToggles, sliders)
     }
-
-    // ─── SETTINGS ──────────────────────────────────────────────────────────
 
     private fun renderSettingsGrouped(
         buttons: List<Utils.ButtonAction>,
@@ -461,11 +528,6 @@ class PresetsController(
         maybeEmpty(buttons, toggles, customButtons, customToggles, sliders)
     }
 
-    // ─── Default (Recording / Misc) ────────────────────────────────────────
-
-
-    // ─── OFFLINE (no ADB) ──────────────────────────────────────────────────
-
     private fun renderOfflineGrouped(
         buttons: List<Utils.ButtonAction>,
         toggles: List<Utils.ToggleAction>,
@@ -473,7 +535,7 @@ class PresetsController(
         customToggles: List<Utils.CustomToggleAction>,
         sliders: List<Utils.SliderAction>
     ) {
-        addHint("These work without ADB on the device running Helix. Brightness/timeout need Modify system settings.")
+        addHint("Network & ADB tools first. Local (no ADB) controls below. Brightness/timeout need Modify system settings.")
 
         data class Bucket(val title: String, val pred: (String) -> Boolean)
         val buckets = listOf(
@@ -509,6 +571,148 @@ class PresetsController(
             sliders.forEach { addSlider(it) }
         }
         maybeEmpty(buttons, toggles, customButtons, customToggles, sliders)
+    }
+
+    private fun renderAudioGrouped(
+        buttons: List<Utils.ButtonAction>,
+        toggles: List<Utils.ToggleAction>,
+        customButtons: List<Utils.CustomButtonAction>,
+        customToggles: List<Utils.CustomToggleAction>,
+        sliders: List<Utils.SliderAction>
+    ) {
+        addHint("Mic mute, voice changer (needs RECORD_AUDIO), and soundboard clips from URL. Voice is local preview unless the OS routes capture through Helix.")
+
+        val mute = customToggles.filter { labelMatches(it.label, "mute", "microphone") }
+        val voiceToggles = customToggles.filter { labelMatches(it.label, "voice") && it !in mute }
+        val restToggles = customToggles.filter { it !in mute && it !in voiceToggles }
+
+        if (mute.isNotEmpty()) {
+            addHeader("Mute")
+            mute.forEach { addCustomToggle(it) }
+        }
+        if (voiceToggles.isNotEmpty()) {
+            addHeader("Voice changer")
+            voiceToggles.forEach { addCustomToggle(it) }
+        }
+        val presets = customButtons.filter { labelMatches(it.label, "preset", "voice status") }
+        if (presets.isNotEmpty()) {
+            addHeader("Voice presets")
+            presets.forEach { addCustomButton(it) }
+        }
+        addSoundboardSection()
+        val otherBtn = customButtons.filter { it !in presets }
+        if (otherBtn.isNotEmpty()) {
+            addHeader("Audio actions")
+            otherBtn.forEach { addCustomButton(it) }
+        }
+        if (restToggles.isNotEmpty()) {
+            addHeader("Other")
+            restToggles.forEach { addCustomToggle(it) }
+        }
+        if (toggles.isNotEmpty()) {
+            addHeader("Toggles")
+            toggles.forEach { addToggle(it) }
+        }
+        if (buttons.isNotEmpty()) {
+            addHeader("Buttons")
+            buttons.forEach { addButton(it) }
+        }
+        if (sliders.isNotEmpty()) {
+            addHeader("Sliders")
+            sliders.forEach { addSlider(it) }
+        }
+        maybeEmpty(buttons, toggles, customButtons, customToggles, sliders, extra = true)
+    }
+
+    private fun addSoundboardSection() {
+        addHeader("Soundboard")
+        val urlEt = EditText(context).apply {
+            hint = "https://…/sound.mp3"
+            textSize = 12f
+        }
+        styleInput(urlEt)
+        val nameEt = EditText(context).apply {
+            hint = "Clip name (optional)"
+            textSize = 12f
+        }
+        styleInput(nameEt)
+        val addBtn = Button(context).apply {
+            text = "Download to soundboard"
+            setOnClickListener {
+                val url = urlEt.text.toString().trim()
+                val name = nameEt.text.toString().trim().ifBlank { null }
+                if (url.isEmpty()) {
+                    ctx.toast("Enter a URL")
+                    return@setOnClickListener
+                }
+                scope.launch(Dispatchers.IO) {
+                    SoundBoard.downloadFromUrl(ctx, url, name)
+                    scope.launch(Dispatchers.Main) { refreshSoundboardList() }
+                }
+            }
+        }
+        styleFilledButton(addBtn)
+        addToCurrent(urlEt, matchWidthParams())
+        addToCurrent(nameEt, matchWidthParams())
+        addToCurrent(addBtn, matchWidthParams())
+
+        val listHost = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = "soundboard_list"
+        }
+        addToCurrent(listHost, matchWidthParams())
+        refreshSoundboardList(listHost)
+    }
+
+    private fun refreshSoundboardList(host: LinearLayout? = null) {
+        val container = host ?: run {
+            fun find(v: android.view.ViewGroup): LinearLayout? {
+                for (i in 0 until v.childCount) {
+                    val c = v.getChildAt(i)
+                    if (c is LinearLayout && c.tag == "soundboard_list") return c
+                    if (c is android.view.ViewGroup) find(c)?.let { return it }
+                }
+                return null
+            }
+            find(categoryContent)
+        } ?: return
+        container.removeAllViews()
+        val clips = SoundBoard.loadAll(context)
+        if (clips.isEmpty()) {
+            container.addView(TextView(context).apply {
+                text = "No clips yet — paste a direct mp3/ogg/wav URL above."
+                setTextColor(colorTextSecondary)
+                textSize = 12f
+            })
+            return
+        }
+        clips.forEach { clip ->
+            val row = cardRow()
+            val tv = TextView(context).apply {
+                text = clip.name
+                setTextColor(colorTextPrimary)
+                textSize = 13f
+            }
+            val play = Button(context).apply {
+                text = "Play"
+                setOnClickListener {
+                    scope.launch(Dispatchers.IO) { SoundBoard.play(ctx, clip.id) }
+                }
+            }
+            styleOutlineButton(play)
+            val del = Button(context).apply {
+                text = "Del"
+                setOnClickListener {
+                    SoundBoard.delete(context, clip.id)
+                    refreshSoundboardList(container)
+                }
+            }
+            styleOutlineButton(del, tint = colorStatusError)
+            row.addView(tv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(play)
+            row.addView(del)
+            container.addView(row, matchWidthParams())
+        }
     }
 
     private fun renderDefaultGrouped(
@@ -563,19 +767,12 @@ class PresetsController(
             background = rounded(0x228B5CF6, 12f)
             setLineSpacing(0f, 1.15f)
         }
-        // Hints sit outside collapsible sections
         currentSectionBody = null
         categoryContent.addView(tv, matchWidthParams().apply {
             bottomMargin = px(6)
         })
     }
 
-    /**
-     * Collapsible section header.
-     * - Tap to expand / collapse
-     * - State remembered while you stay on the same category
-     * - Chevron: ▼ expanded, ▶ collapsed
-     */
     fun addHeader(text: String, startExpanded: Boolean = true) {
         val key = "${currentCategory.name}::$text"
         val expanded = sectionExpanded.getOrPut(key) { startExpanded }
@@ -610,7 +807,6 @@ class PresetsController(
         val body = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (expanded) View.VISIBLE else View.GONE
-            // Slight inset so items sit under the header as one group
             setPadding(px(4), px(2), px(4), px(6))
             background = rounded(0x1012101A, 0f)
         }
@@ -634,7 +830,6 @@ class PresetsController(
         currentSectionBody = body
     }
 
-    /** Add a view into the current collapsible section (or top-level if none). */
     private fun addToCurrent(view: View, params: LinearLayout.LayoutParams = matchWidthParams()) {
         val target = currentSectionBody ?: categoryContent
         target.addView(view, params)
@@ -681,6 +876,30 @@ class PresetsController(
         }
     }
 
+    /** Translucent frosted-glass row (used for toggles). */
+    private fun frostedRow(): LinearLayout {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(16), px(14), px(14), px(14))
+            background = frostedGlass(14f)
+        }
+    }
+
+    private fun frostedGlass(radiusDp: Float): GradientDrawable {
+        val accentWash = (0x28000000) or (colorAccent and 0x00FFFFFF)
+        val top = 0x38FFFFFF
+        val bottom = accentWash
+        return GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(top, bottom)
+        ).apply {
+            cornerRadius = radiusDp * dp
+            shape = GradientDrawable.RECTANGLE
+            setStroke((1.2f * dp).toInt().coerceAtLeast(1), 0x55FFFFFF)
+        }
+    }
+
     private fun gradientRounded(start: Int, end: Int, radiusDp: Float): GradientDrawable {
         return GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
@@ -722,7 +941,7 @@ class PresetsController(
                 }
             }
         }
-        styleOutlineButton(btn)
+        styleFilledButton(btn)
         addToCurrent(btn, matchWidthParams())
     }
 
@@ -753,7 +972,7 @@ class PresetsController(
     }
 
     fun toggleRow(label: String, onToggle: (Boolean) -> Unit): LinearLayout {
-        val row = cardRow()
+        val row = frostedRow()
         val tv = TextView(context).apply {
             text = label
             setTextColor(colorTextPrimary)
@@ -780,6 +999,7 @@ class PresetsController(
         }
         row.addView(tv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(sw)
+        Anim.bindPressFeedback(row, pressedScale = 0.96f)
         return row
     }
 
