@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+// contact blaku64th on discord if you have any issues ^^
 data class GpuMonitorInfo(
     val tempCelsius: Int = 0,
     val freqMhz: Int = 0,

@@ -83,7 +83,6 @@ object IonStackRoot {
     enum class QuestModel {
         QUEST_1, QUEST_2, QUEST_PRO, QUEST_3, QUEST_3S, UNKNOWN
     }
-    // uses props in system to detect your meta device model (dont have enough data to support 3s xbox edition ToT)
     fun detectQuestModel(ctx: Utils.ActionContext): QuestModel {
         val name = ctx.run("getprop ro.product.name").trim().lowercase()
         val model = ctx.run("getprop ro.product.model").trim().lowercase()
@@ -109,7 +108,6 @@ object IonStackRoot {
         else -> null
     }
 
-    // unused function to get data needed to make a root command in ionstack. use it if you want :P
     fun firmwareUrl(model: QuestModel, incremental: String): String? {
         val enc = URLEncoder.encode(incremental, StandardCharsets.UTF_8.name())
         return when (model) {
@@ -162,7 +160,6 @@ object IonStackRoot {
         return methods.any { it() }
     }
 
-    // file integrity
     private fun sha256Hex(file: File): String? {
         return try {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -267,7 +264,7 @@ object IonStackRoot {
             }
         }
         listOf(
-            "$payloadpath/singularity_magisk.sh" to "$tmppath/singularity_magisk.sh",
+            "$payloadpath/magisk.sh" to "$tmppath/magisk.sh",
             "$exploitpath/busybox" to "$tmppath/busybox",
             "$payloadpath/cheese_root.sh" to "$tmppath/cheese_root.sh",
             "$payloadpath/cheese_launch.sh" to "$tmppath/cheese_launch.sh",

@@ -17,7 +17,6 @@ import kotlin.coroutines.resume
 
 // contact blaku64th on discord if you have any issues ^^
 object AdbDiscovery {
-    // find pairing data
     const val pairingtype = "_adb-tls-pairing._tcp."
     const val connecttype = "_adb-tls-connect._tcp."
 
@@ -110,43 +109,23 @@ object AdbDiscovery {
 
                                 if (port !in 1..65535) return
 
+                                val endpoint = Endpoint(host = host, port = port)
+
                                 if (!verifySocket) {
-                                    finish(
-                                        Endpoint(
-                                            host = host,
-                                            port = port
-                                        )
-                                    )
+                                    finish(endpoint)
                                     return
                                 }
 
                                 CoroutineScope(Dispatchers.IO).launch {
-
-                                    val alive = runCatching {
-
+                                    runCatching {
                                         Socket().use { socket ->
-
                                             socket.connect(
-                                                InetSocketAddress(
-                                                    host,
-                                                    port
-                                                ),
-                                                500
+                                                InetSocketAddress(host, port),
+                                                1_200
                                             )
-
-                                            true
                                         }
-
-                                    }.getOrDefault(false)
-
-                                    if (alive) {
-                                        finish(
-                                            Endpoint(
-                                                host = host,
-                                                port = port
-                                            )
-                                        )
                                     }
+                                    finish(endpoint)
                                 }
                             }
                         }

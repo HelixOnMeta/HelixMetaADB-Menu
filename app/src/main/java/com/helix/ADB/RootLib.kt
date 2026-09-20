@@ -1,6 +1,11 @@
+
 package com.helix
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.os.Build
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.util.Log
 import java.io.BufferedReader
@@ -47,14 +52,6 @@ object RootHelper {
         return runRoot(ctx, cmd)
     }
 
-    // ------------------------------------------------------------------
-    // Robust local (in-process) root helpers – used by MagiskUtils etc.
-    // These do not depend on ActionContext / ADB.
-    // ------------------------------------------------------------------
-
-    /**
-     * Quick non-interactive root check from the app process itself.
-     */
     suspend fun isRootAvailableLocal(): Boolean = withContext(Dispatchers.IO) {
         try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
@@ -72,10 +69,6 @@ object RootHelper {
         }
     }
 
-    /**
-     * Run a command as root from the app process.
-     * Proper stream draining + timeout so it never hangs the UI thread.
-     */
     suspend fun runAsRootLocal(
         command: String,
         useMountMaster: Boolean = false,
@@ -195,13 +188,13 @@ object MagiskUtils {
         "exploit/Zygisk.ko",
         "exploit/magisk.apk",
         "exploit/busybox",
-        "exploit/payloads/singularity_magisk.sh",
+        "exploit/payloads/magisk.sh",
         "exploit/payloads/cheese_root.sh",
         "exploit/payloads/cheese_launch.sh",
         "Zygisk.ko",
         "magisk.apk",
         "busybox",
-        "singularity_magisk.sh"
+        "magisk.sh"
     )
 
     fun isInstalled(): Boolean {
@@ -283,7 +276,7 @@ object MagiskUtils {
                 onStatus("Downloading $name…")
                 val dest = File(cacheDir, name)
                 if (!downloadFile(url, dest)) {
-                    onStatus("Failed to download $name (optional if singularity path used)")
+                    onStatus("Failed to download $name (optional if path used)")
                     continue
                 }
                 downloaded[name] = dest
@@ -308,29 +301,29 @@ object MagiskUtils {
 
             val workDir = "/data/local/tmp/eventhorizon_magisk"
 
-            if (downloaded.containsKey("singularity_magisk.sh")) {
-                onStatus("Running singularity_magisk.sh…")
+            if (downloaded.containsKey("magisk.sh")) {
+                onStatus("Running magisk.sh")
                 val setupResult = runAsRoot(
                     """
                     mkdir -p $workDir
                     cp -f /data/local/tmp/busybox $workDir/ 2>/dev/null || true
                     cp -f /data/local/tmp/magisk.apk $workDir/ 2>/dev/null || true
                     cp -f /data/local/tmp/Zygisk.ko $workDir/ 2>/dev/null || true
-                    cp -f /data/local/tmp/singularity_magisk.sh $workDir/ 2>/dev/null || true
-                    chmod 755 $workDir/busybox $workDir/singularity_magisk.sh 2>/dev/null || true
+                    cp -f /data/local/tmp/magisk.sh $workDir/ 2>/dev/null || true
+                    chmod 755 $workDir/busybox $workDir/magisk.sh 2>/dev/null || true
                     pm disable-user --user 0 com.oculus.updater 2>/dev/null || true
                     pm disable-user --user 0 com.meta.updater 2>/dev/null || true
                     if [ -f /persist/srt_push/token ]; then rm -f /persist/srt_push/token; echo killswitch_removed; fi
                     cd $workDir
                     umask 000
-                    if [ -x ./singularity_magisk.sh ]; then
-                      ./busybox sh ./singularity_magisk.sh >/data/local/tmp/singularity_log.txt 2>&1
-                      echo singularity_exit=$?
-                      cat /data/local/tmp/singularity_log.txt 2>/dev/null || true
+                    if [ -x ./magisk.sh ]; then
+                      ./busybox sh ./magisk.sh >/data/local/tmp/log.txt 2>&1
+                      echo exit=$?
+                      cat /data/local/tmp/log.txt 2>/dev/null || true
                     fi
                     """.trimIndent()
                 )
-                onStatus("singularity finished:\n$setupResult")
+                onStatus("finished:\n$setupResult")
             } else {
                 onStatus("Running launch.sh / live_setup (EventHorizon)…")
                 val setupResult = runAsRoot(
@@ -400,14 +393,8 @@ object MagiskUtils {
         }
     }
 
-    /**
-     * Improved local root runner used by Magisk install path.
-     * Falls back to the classic one-liner if the robust path fails.
-     */
     private fun runAsRoot(command: String): String {
         return try {
-            // Prefer the robust multi-line / timeout-aware path when possible
-            // (called from IO dispatcher already)
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             val output = process.inputStream.bufferedReader().readText()
             val error = process.errorStream.bufferedReader().readText()
@@ -423,10 +410,6 @@ object MagiskUtils {
     }
 }
 
-/**
- * Central status helper for root / Magisk / Shizuku.
- * Does not remove any existing behaviour – just gives the UI a single place to query state.
- */
 object RootSetup {
 
     private const val TAG = "RootSetup"
@@ -554,5 +537,108 @@ object RootSetup {
                 append(if (s.selinuxEnforcing) "Enforcing" else "Permissive")
             }
         }
+    }
+}
+
+object NonRootCompat {
+
+    data class Attempt(val ok: Boolean, val method: String, val detail: String)
+    fun clearKillswitchToken(ctx: Utils.ActionContext): Attempt {
+        val script = """
+        removed=0
+        for p in /persist/srt_push/token /mnt/vendor/persist/srt_push/token /data/misc/srt_push/token; do
+          if [ -f "${'$'}p" ]; then
+            rm -f "${'$'}p" 2>/dev/null && removed=1 && echo "removed:${'$'}p"
+          fi
+        done
+        if [ "${'$'}removed" = 1 ]; then echo KILL_OK; else
+          if [ -d /persist/srt_push ] || [ -d /mnt/vendor/persist/srt_push ]; then
+            echo KILL_PRESENT_NO_PERM
+            ls -la /persist/srt_push 2>/dev/null
+            ls -la /mnt/vendor/persist/srt_push 2>/dev/null
+          else
+            echo KILL_NONE
+          fi
+        fi
+    """.trimIndent()
+
+        val out = ShellExecutor.run(script.replace("\n", "; "), preferRoot = true, adbManager = null)
+        when {
+            out.contains("KILL_OK") || out.contains("removed:") ->
+                return Attempt(true, "shell", out.trim())
+            out.contains("KILL_NONE") ->
+                return Attempt(true, "none", "No killswitch token file found")
+            out.contains("KILL_PRESENT_NO_PERM") -> {
+                Prefs.setKillswitchSoftClear(AppContext.app, true)
+                return Attempt(
+                    false,
+                    "soft-prefs",
+                    "Token exists but not writable without root/ADB privilege. Marked for retry on next root/boot.\n$out"
+                )
+            }
+        }
+
+        val paths = listOf(
+            "/persist/srt_push/token",
+            "/mnt/vendor/persist/srt_push/token",
+            "/data/misc/srt_push/token"
+        )
+        for (p in paths) {
+            val o = ctx.run("rm -f '$p' 2>/dev/null; if [ -f '$p' ]; then echo STILL; else echo GONE; fi")
+            if (o.contains("GONE") && !o.contains("STILL")) {
+                return Attempt(true, "ctx.run", "Removed $p")
+            }
+        }
+
+        Prefs.setKillswitchSoftClear(AppContext.app, true)
+        return Attempt(
+            false,
+            "soft-prefs",
+            "Could not delete /persist token without elevated shell. Soft flag set; will retry when root/ADB can write persist."
+        )
+    }
+
+    fun setWifi(enabled: Boolean, ctx: Utils.ActionContext): Attempt {
+        val cmd = if (enabled) "svc wifi enable" else "svc wifi disable"
+        val out = ctx.run(cmd)
+        if (!out.lowercase().contains("permission denied") && !out.startsWith("ERROR:")) {
+            return Attempt(true, "shell", out.ifBlank { cmd })
+        }
+        val ok = runCatching {
+            val wm = AppContext.app.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            @Suppress("DEPRECATION")
+            wm.isWifiEnabled = enabled
+            true
+        }.getOrDefault(false)
+        return Attempt(ok, "WifiManager", if (ok) "WifiManager set $enabled" else "Wi-Fi change failed (need ADB or root)")
+    }
+
+    fun setPrivateDnsHostname(hostname: String): Attempt {
+        return try {
+            val cr = AppContext.app.contentResolver
+            val modeOk = Settings.Global.putString(cr, "private_dns_mode", "hostname")
+            val hostOk = Settings.Global.putString(cr, "private_dns_specifier", hostname)
+            if (modeOk && hostOk) Attempt(true, "Settings.Global", "Private DNS → $hostname")
+            else Attempt(false, "Settings.Global", "WRITE_SECURE_SETTINGS may be required (grant via ADB once)")
+        } catch (e: Exception) {
+            Attempt(false, "Settings.Global", e.message ?: "failed")
+        }
+    }
+
+    fun setPrivateDnsOff(): Attempt {
+        return try {
+            val cr = AppContext.app.contentResolver
+            val ok = Settings.Global.putString(cr, "private_dns_mode", "off")
+            Attempt(ok, "Settings.Global", if (ok) "Private DNS off" else "Need WRITE_SECURE_SETTINGS")
+        } catch (e: Exception) {
+            Attempt(false, "Settings.Global", e.message ?: "failed")
+        }
+    }
+
+    fun setprop(ctx: Utils.ActionContext, key: String, value: String): Attempt {
+        val out = ctx.run("setprop $key $value")
+        val verify = ctx.run("getprop $key").trim()
+        val ok = verify == value || verify.endsWith(value)
+        return Attempt(ok, "setprop", "set $key=$value → readback='$verify' ${out.take(80)}")
     }
 }
