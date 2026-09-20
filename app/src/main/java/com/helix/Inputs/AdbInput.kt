@@ -29,8 +29,6 @@ import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
 
 // contact blaku64th on discord if you have any issues ^^
-
-
 object GamepadInput {
 
     interface Listener {
@@ -51,7 +49,6 @@ object GamepadInput {
         listeners.remove(l)
     }
 
-    // Call from Activity.onKeyDown
     fun handleKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (event.source and InputDevice.SOURCE_GAMEPAD != InputDevice.SOURCE_GAMEPAD) return false
         val name = KeyEvent.keyCodeToString(keyCode)
@@ -59,7 +56,6 @@ object GamepadInput {
         return true
     }
 
-    // Call from Activity.onKeyUp
     fun handleKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (event.source and InputDevice.SOURCE_GAMEPAD != InputDevice.SOURCE_GAMEPAD) return false
         val name = KeyEvent.keyCodeToString(keyCode)
@@ -67,7 +63,6 @@ object GamepadInput {
         return true
     }
 
-    // Call from Activity.onGenericMotionEvent
     fun handleMotion(event: MotionEvent): Boolean {
         if (event.source and InputDevice.SOURCE_JOYSTICK != InputDevice.SOURCE_JOYSTICK) return false
         val lx = event.getAxisValue(MotionEvent.AXIS_X)
@@ -83,7 +78,6 @@ object GamepadInput {
         return true
     }
 
-    // Register/unregister connect-disconnect tracking — call from Activity onStart/onStop
     fun startWatching(inputManager: InputManager) {
         if (deviceListener != null) return
         deviceListener = object : InputManager.InputDeviceListener {
@@ -680,13 +674,6 @@ object AdbGamepadKeyEvents {
     }
 }
 
-
-/**
- * High-level controller injection mods built on [AdbGamepadKeyEvents].
- * Requires wireless ADB + learned /dev/input nodes (Force Start / Find Inputs).
- *
- * Modes re-assert holds on an interval so physical presses are fought/overridden.
- */
 object InputMods {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -720,7 +707,6 @@ object InputMods {
                 try {
                     tick++
                     if (blockKeyEvents) {
-                        // Force everything released every tick
                         forceReleaseAll()
                     } else {
                         if (holdBothGrips) {
@@ -737,7 +723,6 @@ object InputMods {
                         if (holdY) AdbGamepadKeyEvents.Y.hold = true
 
                         if (fingerSpaz) {
-                            // Spam grips + triggers (finger motion surrogate)
                             val on = (tick % 2 == 0)
                             AdbGamepadKeyEvents.LeftGrip.hold = on
                             AdbGamepadKeyEvents.RightGrip.hold = !on
@@ -762,7 +747,6 @@ object InputMods {
                 }
                 delay(if (fingerSpaz || gripSpaz || mashFace) SPAZ_MS else REASSERT_MS)
             }
-            // Cleanup on exit
             forceReleaseAll()
             job = null
         }
@@ -770,7 +754,6 @@ object InputMods {
 
     private fun forceReleaseAll() {
         AdbGamepadKeyEvents.releaseAll()
-        // Extra explicit ups in case hold flags were already false
         listOf(
             AdbGamepadKeyEvents.A, AdbGamepadKeyEvents.B,
             AdbGamepadKeyEvents.X, AdbGamepadKeyEvents.Y,
