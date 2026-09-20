@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+// contact blaku64th on discord if you have any issues ^^
 object Hover {
 
     var speed: Float = 2f

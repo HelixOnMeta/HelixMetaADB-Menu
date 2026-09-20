@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.min
 import kotlin.math.sqrt
 
+// contact blaku64th on discord if you have any issues ^^
 object VelocityFly {
 
     var minSpeed: Float = 1f

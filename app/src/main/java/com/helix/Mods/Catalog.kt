@@ -487,8 +487,12 @@ object Catalog {
 
     val EXTRA_SLIDERS: List<Utils.SliderAction> = listOf(
         Utils.SliderAction(
-            "Fly Speed Tier", 0, 5, 2,
+            "Fly Speed", 0, 5, 2,
             "setprop debug.mod.flySpeed %VALUE%", Utils.Category.MODS
+        ),
+        Utils.SliderAction(
+            "UpDown Speed", 0, 1000, 10,
+            "setprop debug.mod.upDownSpeed %VALUE%", Utils.Category.MODS
         ),
         Utils.SliderAction(
             "Fly Acceleration", 0, 3, 1,
@@ -553,10 +557,6 @@ object Catalog {
     }
 
     val ExtraCustomSliders: List<Utils.CustomSliderAction> = listOf(
-        // Add more here, e.g.:
-        // Utils.CustomSliderAction("My Slider", 0, 100, 50, Utils.Category.MODS) { ctx, v ->
-        //     ctx.run("setprop debug.my.value ${'$'}{v.toInt()}")
-        // }
     )
 
     fun mergedCustomSliders(): List<Utils.CustomSliderAction> = buildList {

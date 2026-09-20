@@ -24,6 +24,7 @@ object UpDown {
     private var armed = false
     private var lastTickNs = 0L
     private var wasGripping = false
+    private var lastPropCheckNs = 0L
 
     fun start(ctx: Utils.ActionContext) {
         if (job?.isActive == true) return
@@ -31,7 +32,9 @@ object UpDown {
         enabled = true
         lastTickNs = System.nanoTime()
         wasGripping = false
-        ctx.log("[UpDown] ON — hold grip, RT=up LT=down")
+        lastPropCheckNs = 0L
+        refreshStep(ctx)
+        ctx.log("[UpDown] ON — hold grip, RT=up LT=down (speed=$step)")
         ctx.toast("Up/Down: hold grip")
 
         val handler = CoroutineExceptionHandler { _, e -> ctx.log("[UpDown error] ${e.message}") }
@@ -42,6 +45,12 @@ object UpDown {
                     val dt = if (lastTickNs == 0L) 0.016f
                     else ((now - lastTickNs) / 1_000_000_000.0).toFloat().coerceIn(0.001f, 0.05f)
                     lastTickNs = now
+
+                    // Refresh speed from slider prop every ~500ms
+                    if (now - lastPropCheckNs > 500_000_000L) {
+                        lastPropCheckNs = now
+                        refreshStep(ctx)
+                    }
 
                     val gripping = Input.leftSqueeze() || Input.rightSqueeze()
                     val leftTrig = Input.leftTrigger()
@@ -78,6 +87,16 @@ object UpDown {
                     ctx.log("[UpDown error] ${e.message}")
                 }
                 delay(16)
+            }
+        }
+    }
+
+    private fun refreshStep(ctx: Utils.ActionContext) {
+        runCatching {
+            val out = ctx.run("getprop debug.mod.upDownSpeed").trim()
+            if (out.isNotEmpty()) {
+                val v = out.toFloatOrNull()
+                if (v != null) step = v.coerceIn(0f, 1000f)
             }
         }
     }
